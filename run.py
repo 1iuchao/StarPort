@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
 import sys
 import threading
@@ -24,7 +25,7 @@ from core import console                                  # noqa: E402
 # ★ 必须最早调用：pythonw 无窗口运行时把日志重定向到文件，否则 print 会当场崩
 HEADLESS = console.setup()
 
-from core import jobobj, paths                            # noqa: E402
+from core import instance, jobobj, paths                  # noqa: E402
 from core.hotkey import HOTKEY                            # noqa: E402
 from core.server import CTX, serve                        # noqa: E402
 from core.settings import CONFIG                          # noqa: E402
@@ -59,6 +60,15 @@ def _apply_runtime() -> None:
         print(f"[StarPort] 全局快捷键不可用：{exc}")
 
 
+def _release_instance(port: int, pid: int) -> None:
+    """退出时抹掉自己的留痕。atexit 兜底，任何异常都不许冒出去。"""
+    try:
+        instance.unregister(port)
+        instance.release_primary(pid)
+    except BaseException:
+        pass
+
+
 def _watchdog(stop_event: threading.Event) -> None:
     """壳心跳监视：用户关掉窗口 = 退出平台（连带回收所有应用进程）。"""
     while not stop_event.is_set():
@@ -77,8 +87,13 @@ def main() -> int:             # noqa: C901
         description="StarPort · 星港：本地应用聚合平台（插件化、离线、进程隔离）")
     parser.add_argument("--port", type=int, default=0, help="平台监听端口（0=自动）")
     parser.add_argument("--no-window", action="store_true", help="只起服务不开窗口")
+    parser.add_argument("--allow-second", action="store_true",
+                        help="允许再起一个实例（调试用；默认已有实例时直接复用它）")
     parser.add_argument("--autostarted", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    # 显式 --port 视为"刻意要开第二份"，不参与单实例复用（工单里那个
+    # 19600 调试实例就是这么起的）。其余情况只允许一个星港。
+    want_second = bool(args.port) or args.allow_second
 
     if sys.version_info < (3, 10):
         msg = "需要 Python 3.10 或更高版本"
@@ -88,8 +103,32 @@ def main() -> int:             # noqa: C901
         return 1
 
     paths.ensure_dirs()
-    if args.port:
-        CONFIG.platform["port_base"] = args.port
+
+    # ★ 单实例复用：已经有星港在跑，就把它的窗口提到前台，本次不再起第二份。
+    #   判据是"端口上真有一个星港在应答"（core/instance.py），不是 PID，
+    #   所以被强杀留下的陈旧记录不会误伤 —— 也不会再攒出"看不见的幽灵实例"。
+    if not want_second:
+        prev = instance.live_primary()
+        if prev:
+            print(f"[StarPort] 已有实例在运行：PID {prev.get('pid')} "
+                  f"端口 {prev.get('port')} 启动于 {prev.get('started')} —— 本次不再重复启动")
+            if not args.no_window and not focus_window(TITLE):
+                # 窗口没找到（对方多半是 --no-window 实例）：弹一条能看懂的提示，
+                # 否则用户双击了却什么都没发生，又是一笔糊涂账。
+                console.notify(
+                    "StarPort 已在运行",
+                    f"PID {prev.get('pid')}　端口 {prev.get('port')}\n"
+                    f"启动于 {prev.get('started')}\n\n"
+                    f"本次没有重复启动。要重启请先关掉它：\n"
+                    f"　python tools\\stop_instance.py",
+                    error=False)
+            return 0
+
+    # ★ --port 只表示"本次启动优先用这个端口"，不再写回 CONFIG。
+    #   写回会被随后任意一次配置保存（/api/settings）带进 data/config.json，
+    #   把平台永久钉死在这个端口上 —— 2026-09-23 那次 WinError 10048
+    #   （19600 被一个 --no-window 残留实例占住，之后每次启动都撞它）
+    #   就是这么形成的。顺延逻辑在 core/server.py::serve()。
 
     # ★ 建立 Job Object：平台一旦退出（含被任务管理器强杀），
     #   OS 会连带回收所有应用进程，不留孤儿占端口
@@ -108,6 +147,17 @@ def main() -> int:             # noqa: C901
         if HEADLESS:
             console.notify("StarPort 启动失败", msg)
         return 1
+
+    # ★ 留痕：让这个实例可被发现、可被关闭（data/instances/<port>.json）。
+    #   每个实例都留（包括 --port 起的第二实例）—— 看不见的进程必须留得下痕迹。
+    mode = "no-window" if args.no_window else "window"
+    instance.register(port, os.getpid(), mode)
+    atexit.register(_release_instance, port, os.getpid())
+
+    if not want_second:
+        if instance.acquire_primary(port, os.getpid(), mode):
+            atexit.register(instance.release_primary, os.getpid())
+            print(f"[StarPort] 主实例留痕：PID {os.getpid()} 端口 {port}")
 
     CTX.apply_runtime = _apply_runtime
     print(f"[StarPort] 平台已启动：http://127.0.0.1:{port}/  "
@@ -134,6 +184,10 @@ def main() -> int:             # noqa: C901
         print("\n[StarPort] 收到中断信号")
 
     print("[StarPort] 正在回收应用进程…")
+    # ★ 在这里显式删掉自己的留痕，别只指望 atexit：解释器关闭阶段某些操作
+    #   （开线程、部分文件操作）已经不可靠了，atexit 里的删除有可能是空跑。
+    #   两条路都留着：这里是正常路径，atexit 兜底异常路径。
+    _release_instance(port, os.getpid())
     try:
         CTX.supervisor.stop_all()          # type: ignore[union-attr]
     except Exception:

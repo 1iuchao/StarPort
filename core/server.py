@@ -438,6 +438,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "file": stored,
                                "url": f"/_bg/{stored}", "size": len(raw)})
 
+        if path == "/api/background/delete":
+            # 删除 background/ 里的一张素材。只允许删这个目录内的文件；
+            # 如果删的正好是当前背景，顺手退回默认预设，免得壳引用一个不存在的文件。
+            name = os.path.basename(str(data.get("file") or ""))
+            if not name:
+                return self._json({"ok": False, "error": "缺少文件名"}, 400)
+            target = (paths.BACKGROUND_DIR / name).resolve()
+            if not str(target).startswith(str(paths.BACKGROUND_DIR.resolve())):
+                return self._json({"ok": False, "error": "非法路径"}, 403)
+            if not target.is_file():
+                return self._json({"ok": False, "error": "文件不存在"}, 404)
+            try:
+                target.unlink()
+            except Exception as exc:
+                return self._json({"ok": False, "error": f"删除失败：{exc}"}, 500)
+            bg = CONFIG.platform.get("background") or {}
+            reverted = (bg.get("type") == "file"
+                        and os.path.basename(str(bg.get("file") or "")) == name)
+            if reverted:
+                CONFIG.platform["background"] = {"type": "preset", "value": "theme"}
+                CONFIG.save()
+            return self._json({"ok": True, "file": name, "reverted": bool(reverted)})
+
         if path == "/api/state":
             patch = data.get("patch") or {}
             for k, v in patch.items():
@@ -513,6 +536,12 @@ class LocalServer(ThreadingHTTPServer):
 
 
 def pick_port(base: int, span: int = 50) -> int:
+    """只做**探测**：返回第一个看起来空闲的端口，不持有它。
+
+    ⚠️ 别用它来挑真正要绑定的端口 —— 探完即关，探与绑之间有一道缝，
+    两个实例同时启动时会一起探到同一个端口，然后其中一个必吃 WinError 10048
+    （2026-09-23 实测：12 个并发里挂 5 个）。真要绑定请用 bind_platform()。
+    """
     for i in range(span):
         p = base + i
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -524,10 +553,35 @@ def pick_port(base: int, span: int = 50) -> int:
     raise RuntimeError(f"平台端口 {base}~{base + span - 1} 均被占用")
 
 
+def bind_platform(base: int, span: int = 50) -> tuple[LocalServer, int]:
+    """从 base 起逐个**真正绑定**，谁先绑上就是平台端口。
+
+    ★ 关键在"边试边绑"而不是"先探后绑"（见 pick_port 的警告）：
+      绑定动作本身既是探测也是占位，探与绑之间没有缝，
+      并发启动也不会撞出 WinError 10048。
+      LocalServer 构造失败时 socketserver 已自行 server_close()，无需我们收摊。
+    """
+    last: OSError | None = None
+    for i in range(span):
+        p = base + i
+        try:
+            httpd = LocalServer(("127.0.0.1", p), Handler)
+        except OSError as exc:
+            last = exc
+            continue
+        return httpd, p
+    detail = f"（最后错误：{last}）" if last else ""
+    raise RuntimeError(f"平台端口 {base}~{base + span - 1} 均被占用{detail}")
+
+
 def serve(port: int = 0, background: bool = False) -> tuple[LocalServer, int]:
     base = int(CONFIG.platform.get("port_base") or 19000)
-    port = port or pick_port(base)
-    httpd = LocalServer(("127.0.0.1", port), Handler)
+    # ★ 端口被占用一律顺延，显式端口也走同一条路。
+    #   以前写法是 `port or pick_port(base)`：只有"没指定端口"时才顺延，
+    #   显式端口被占会直接抛 WinError 10048 —— 无窗口启动时就是一个
+    #   系统错误框，用户除了"确定"什么也做不了。
+    #   顺延才是本平台一贯的语义（见 core/ports.py 开头）。
+    httpd, port = bind_platform(port or base)
     CTX.attach(port)
     if background:
         threading.Thread(target=httpd.serve_forever, daemon=True,

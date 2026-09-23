@@ -519,11 +519,17 @@ function pushThemeToApp() {
 }
 
 /* 打开应用时把主题写进 URL —— 应用可以在首屏渲染前就读到，
-   避免"先按默认色渲染再闪一下"的割裂感。 */
+   避免"先按默认色渲染再闪一下"的割裂感。
+
+   ⚠️ 这里**不区分 webservice / static**：static 型是站内路径（/_apps/<id>/...），
+   以前直接原样返回 → 它首屏读不到 sp-*，只能等 postMessage，比 webservice 型
+   慢一拍、且按文档 `if (qs.get('sp-blend') === '1')` 写的应用会永远不透明。
+   站内路径用 location.origin 补成绝对地址即可，语义不变。 */
 function withThemeParams(rawUrl) {
-  if (!rawUrl || !/^https?:/i.test(rawUrl)) return rawUrl;   // static 型是站内路径
+  if (!rawUrl) return rawUrl;
   try {
-    const u = new URL(rawUrl);
+    const u = new URL(rawUrl, location.origin);
+    if (u.origin !== location.origin && !/^https?:$/i.test(u.protocol)) return rawUrl;
     const p = S.settings.platform || {};
     u.searchParams.set('sp-theme', p.theme || 'dark');
     u.searchParams.set('sp-material', p.material || 'liquid-glass');
@@ -575,43 +581,120 @@ function setBackground(spec) {
   applyBackground(spec);
   S.settings.platform = S.settings.platform || {};
   S.settings.platform.background = spec;
+  /* 刚上传的新素材不在缓存里 → 下次渲染重新拉一次列表 */
+  if (spec.type === 'file' && !(BG_FILES || []).some(f => f.file === spec.file)) BG_FILES = null;
   quickSave();
   renderBgPresets();
 }
 
-function renderBgPresets() {
+/* 背景选择器：两组 —— 内置预设 + 「我的背景」（历史上传过的素材）。
+   以前只把"当前那一个"自定义背景画进列表，一换成预设它就从列表里消失，
+   想切回去只能重新挑文件；现在 data/background/ 里的素材一直列着。 */
+let BG_FILES = null;          // 素材列表缓存
+let BG_SEQ = 0;               // 渲染序号，防止异步结果乱序覆盖
+
+async function loadBgFiles(force) {
+  if (BG_FILES && !force) return BG_FILES;
+  const r = await api('/api/background/list');
+  BG_FILES = r.ok ? (r.items || []) : [];
+  return BG_FILES;
+}
+
+function currentBg() {
+  return (S.settings.platform && S.settings.platform.background) || BG_DEFAULT;
+}
+
+function bgIsActive(type, key) {
+  const cur = currentBg();
+  if (type === 'preset') return cur.type === 'preset' && cur.value === key;
+  return cur.type === 'file' && (cur.file === key || cur.url === key);
+}
+
+function bgThumb(url, kind) {
+  if (kind === 'video') {
+    const v = document.createElement('video');
+    v.src = url; v.muted = true; v.autoplay = true; v.loop = true;
+    v.setAttribute('playsinline', '');
+    return v;
+  }
+  const i = document.createElement('img');
+  i.src = url; i.alt = '';
+  return i;
+}
+
+function bgGroup(title, count) {
+  const g = document.createElement('div');
+  g.className = 'bg-group';
+  const t = document.createElement('div');
+  t.className = 'bg-group-title';
+  t.innerHTML = title + (count == null ? '' : ` <span class="count">${count}</span>`);
+  const row = document.createElement('div');
+  row.className = 'bg-presets';
+  g.append(t, row);
+  return { g, row };
+}
+
+async function renderBgPresets() {
   const box = $('#bg-presets');
   if (!box) return;
-  const cur = (S.settings.platform && S.settings.platform.background) || BG_DEFAULT;
+  const seq = ++BG_SEQ;
+  box.innerHTML = '<span class="bg-empty">读取背景素材…</span>';
+  const files = await loadBgFiles();
+  if (seq !== BG_SEQ) return;              // 已有更新的一次渲染，丢弃本次
+
   box.innerHTML = '';
 
+  /* 1) 内置预设 */
+  const g1 = bgGroup('内置背景');
   BG_PRESETS.forEach(p => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'bg-item' + (cur.type === 'preset' && cur.value === p.id ? ' active' : '');
+    b.className = 'bg-item' + (bgIsActive('preset', p.id) ? ' active' : '');
     b.title = p.name;
     b.style.background = p.css || 'var(--stage-bg)';
     b.onclick = () => setBackground({ type: 'preset', value: p.id });
-    box.appendChild(b);
+    g1.row.appendChild(b);
   });
+  box.appendChild(g1.g);
 
-  if (cur.type === 'file' && cur.url) {
+  /* 2) 我的背景：历史素材常驻，随时切回 */
+  const g2 = bgGroup('我的背景', files.length);
+  if (!files.length) {
+    const e = document.createElement('span');
+    e.className = 'bg-empty';
+    e.textContent = '还没上传过背景图 / 视频';
+    g2.row.appendChild(e);
+  }
+  files.forEach(f => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'bg-item active';
-    b.title = '当前自定义背景';
-    if (cur.kind === 'video') {
-      const v = document.createElement('video');
-      v.src = cur.url; v.muted = true; v.autoplay = true; v.loop = true;
-      b.appendChild(v);
-    } else {
-      const i = document.createElement('img');
-      i.src = cur.url; i.alt = '';
-      b.appendChild(i);
+    b.className = 'bg-item' + (bgIsActive('file', f.file) ? ' active' : '');
+    b.title = f.file + (f.kind === 'video' ? '（视频）' : '');
+    b.appendChild(bgThumb(f.url, f.kind));
+    if (f.kind === 'video') {
+      const tag = document.createElement('span');
+      tag.className = 'bg-tag'; tag.textContent = '视频';
+      b.appendChild(tag);
     }
-    b.onclick = () => setBackground(cur);
-    box.appendChild(b);
-  }
+    b.onclick = () => setBackground({ type: 'file', url: f.url, file: f.file, kind: f.kind });
+
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'bg-del'; del.textContent = '✕';
+    del.title = '从素材库里删除这个文件';
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`确定删除背景素材「${f.file}」吗？\n\n` +
+                   `文件将从 data/background/ 中移除，不可恢复。`)) return;
+      const r = await post('/api/background/delete', { file: f.file });
+      if (!r.ok) { alert('删除失败：' + (r.error || '')); return; }
+      if (f.file === (currentBg().file || '')) setBackground(BG_DEFAULT);
+      BG_FILES = null;
+      renderBgPresets();
+    };
+    b.appendChild(del);
+    g2.row.appendChild(b);
+  });
+  box.appendChild(g2.g);
 }
 
 function renderMaterialGrid() {

@@ -29,13 +29,16 @@ SDK_DIR = ROOT / "sdk"
 
 CONFIG_FILE = DATA_DIR / "config.json"
 STATE_FILE = DATA_DIR / "state.json"
+INSTANCES_DIR = DATA_DIR / "instances"         # 运行中实例的留痕，一个端口一份
+PRIMARY_FILE = DATA_DIR / ".instance.json"     # 主实例占位（单实例复用用它判断）
 
 EDGE_PROFILE = DATA_DIR / "shell-profile"      # Edge --app 模式独立 profile
 
 
 def ensure_dirs() -> None:
     """保证运行时目录存在（首次启动自动创建）。"""
-    for d in (APPS_DIR, DATA_DIR, LOG_DIR, APP_DATA_DIR, BACKGROUND_DIR, SHELL_DIR):
+    for d in (APPS_DIR, DATA_DIR, LOG_DIR, APP_DATA_DIR, BACKGROUND_DIR, SHELL_DIR,
+              INSTANCES_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

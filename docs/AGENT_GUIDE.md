@@ -24,6 +24,9 @@
 
 **如果你只有 5 分钟**：走 `static` 型，只需要一个目录 + 一个 JSON 文件。
 
+**如果你的应用要转 Word / Excel / PPT**：先读 §11。
+别急着让用户再装一套 LibreOffice —— 复用他机器上已经装好的 Office / WPS 就够了，零部署。
+
 ---
 
 ## §1 平台是什么（模型）
@@ -465,6 +468,10 @@ curl -X POST -H "Content-Type: application/json" -d '{}' \
 | 中文日志乱码 | 没设编码 | 平台已注入 `PYTHONIOENCODING=utf-8`；应用内部写文件时也要显式 `encoding="utf-8"` |
 | 停止后进程还在 | 应用起了子进程 | 平台会 `taskkill /T /F` 收树；若应用自己 spawn 了脱离进程，需自行处理 |
 | 刚停止就探测端口仍通 | 正常竞态：进程退出与端口关闭有毫秒级延迟 | 等 1 秒再探测；平台状态以 `/api/status` 为准 |
+| 明明装了 Office，应用却显示"未安装" | **Office 从不把自己加进 PATH** | glob `Microsoft Office\root\Office*`，见 §11.2 |
+| 调 Office 转换后，机器越来越卡 | COM 是 MultiUse，每次留一个隐形进程（实测 21 个 ≈ 5 GB） | PID 快照 + 只回收自己拉起的那批，见 §11.5 |
+| Office 转换卡住不返回（尤其 PDF → Word） | Word 拉起独立的 `PDFREFLOW.exe` 弹确认框，`DisplayAlerts=0` 压不掉 | 临时写注册表 `DisableConvertPdfWarning`，见 §11.6 |
+| PowerShell 报路径乱码 / `UnicodeEncodeError` | PS 5.1 把无 BOM 的 UTF-8 脚本按 GBK 解析 | 脚本纯 ASCII，路径走参数，见 §11.3 |
 
 
 ### 关于 iframe 嵌入的两个前提
@@ -495,6 +502,8 @@ curl -X POST -H "Content-Type: application/json" -d '{}' \
 - [ ] **手动 kill 掉应用进程后**，平台和其他应用仍正常（验证隔离）
 - [ ] `id` 全小写、符合 `^[a-z0-9][a-z0-9._-]{0,63}$`
 - [ ] **目录名与 manifest 的 `id` 一致**，且目录不以 `.` / `_` 开头（§2.5）
+- [ ] 依赖是"探出来的"而不是"部署时硬塞的"；本机已有的能力优先复用（§11）
+- [ ] 若用 COM 调 Office/WPS：跑完后没有留下自己拉起的进程（§11.5）
 
 ---
 
@@ -678,12 +687,249 @@ if __name__ == "__main__":
 | 前端框架 | 真要上框架，用**单文件 ESM 版**（如 Vue/Petite-Vue） | 避免引入打包器；引 CDN 会破坏离线要求 → **必须把库文件放本地** |
 | 状态存储 | 后端用 `STARPORT_DATA_DIR`；前端用 `localStorage` | 都按应用隔离，不互相污染 |
 | 通信 | **只走应用自己的 HTTP 端口** | 不要尝试与平台壳通信（跨 origin 拿不到 `window.top`） |
+| 重型格式转换 | **先探本机已有的 Office / WPS（COM）**，探不到再谈装别的 | 零部署、版式还原最好，还能做 PDF → Word；见 §11 |
 
 **三条设计取向**（平台已按这些原则建，接入时保持一致最省事）：
 
 1. **离线优先**：任何外部 CDN 依赖都是缺陷。库文件一律本地化。
 2. **本地回环**：只监听 `127.0.0.1`，不开外网端口，数据不出机器。
 3. **不越界**：应用不 import 平台代码，平台不 import 应用代码；跨进程通信是刻意的隔离边界，别绕开它。
+
+---
+
+## §11 免部署：用本机 Office / WPS 做重型转换（COM 自动化）
+
+> **这一章是一个真实问题的解法记录。** 结论一句话：
+> 应用要支持 Word/Excel/PPT 互转时，**不要**在部署清单里再塞一个几百 MB 的转换套件 ——
+> 直接复用用户机器上已经装好的 Microsoft Office 或 WPS。
+
+### 11.1 问题：为了一个格式，拖来 300MB 依赖
+
+常规做法是让用户再装一套 LibreOffice（300MB+，还得配 `soffice.exe` 路径）。
+但**绝大多数 Windows 机器上本来就装着 Office 或 WPS**。
+
+正确做法：**什么东西都不部署，运行时探测本机已有的那套，用 COM 自动化调用它。**
+版本、授权、升级统统由用户自己负责，应用只做"打开 → 另存 → 关掉"这一件事。
+
+附带好处：它还做得到 LibreOffice 做不到的事 —— **PDF → Word**（Word 2013+ 本身能把 PDF
+打开成可编辑文档再存）。
+
+许可边界要说清楚：**只调用本机已安装并已授权的软件，不分发、不链接、不打包。**
+微软官方不建议在服务端做 Office 自动化；这里是本地工具、一次一文件、只读打开、
+强制禁用宏，属于可接受用法。
+
+### 11.2 先解决"明明装了却探不到"
+
+**Microsoft Office 从不把自己加进 PATH。** `shutil.which("winword")` 必然返回 `None`，
+不主动找就会被误判成"未安装"。而它的安装目录带版本号，只能 glob：
+
+```python
+import glob
+from pathlib import Path
+
+_PATTERNS = [
+    r"C:\Program Files\Microsoft Office\root\Office*",
+    r"C:\Program Files (x86)\Microsoft Office\root\Office*",
+    r"C:\Program Files\Microsoft Office\Office*",
+    r"C:\Program Files (x86)\Microsoft Office\Office*",
+]
+dirs = [Path(h) for p in _PATTERNS for h in sorted(glob.glob(p), reverse=True)]
+```
+
+**WPS 更彻底：连稳定的安装路径都没有**，但 COM ProgID 是稳定的，用它探测：
+
+| 组件 | ProgID | 回收用的进程名 | 备注 |
+|---|---|---|---|
+| Microsoft Word | `Word.Application` | `WINWORD` | |
+| Microsoft Excel | `Excel.Application` | `EXCEL` | |
+| Microsoft PowerPoint | `PowerPoint.Application` | `POWERPNT` | |
+| WPS 文字 | `KWPS.Application` | `wps` | ⚠️ **不是** `WPS.Application`（不存在） |
+| WPS 表格 | `KET.Application` | `et` | ⚠️ **不是** `Excel.Application` |
+| WPS 演示 | — | — | **没有可用的 ProgID**，`WPP.Application` 不存在 |
+
+**探测时只查类型，不要真的启动应用**：
+
+```powershell
+if ([Type]::GetTypeFromProgID('KWPS.Application')) { exit 0 } else { exit 1 }
+```
+
+用 `New-Object -ComObject` 做探测会把 Word/WPS 真的拉起来 —— 启动探测变慢，还可能弹窗口。
+
+### 11.3 调用：一份纯 ASCII 的 .ps1，路径走参数
+
+这一节最容易翻车的一条：
+
+> **PowerShell 5.1 会把无 BOM 的 UTF-8 脚本按 GBK 解析。**
+> 脚本体里只要出现中文（**注释也算**），带中文路径的用户就会炸 `UnicodeEncodeError`，
+> 或者拿到一条乱码路径然后静默失败。
+
+两条硬规则：
+
+1. 脚本**纯 ASCII**；中文一律不写进去（要写说明就写在 Python 那一侧的注释里）；
+2. 所有路径**通过命令行参数传进去**，不要在脚本里拼字符串。
+
+另外 **`-File` 只认 `.ps1` 后缀** —— 临时文件必须带这个扩展名，
+否则 PowerShell 直接拒绝执行。
+
+Python 侧：
+
+```python
+script = out_dir / f"conv_{os.getpid()}.ps1"      # ← 后缀必须是 .ps1
+script.write_text(PS_SCRIPT, encoding="ascii")    # ← 显式 ascii；写不进去就是混进中文了
+subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File", str(script),
+                "-src", str(src), "-dst", str(dst), "-format", str(code)])
+```
+
+> **脚本内容是常量，就写一次缓存复用，别每次转换都新建一个再删掉。**
+> 不只是省事：文件删除是唯一可能被安全软件 / 沙箱拦住的操作，
+> 每删一次被拦一回的话，一次转换能凭空多花好几分钟（实测：12 条用例 48 秒 → 卡成 25 分钟）。
+> 内容对不上（升级后脚本改过）时重写即可。
+
+脚本骨架（省略了进程回收，那是 11.5 的重点）：
+
+```powershell
+param([string]$src, [string]$dst, [int]$format = 0, [string]$app = 'word',
+      [string]$progId = 'Word.Application')
+
+$ErrorActionPreference = 'Stop'
+$obj = New-Object -ComObject $progId
+$doc = $null
+try {
+  switch ($app) {
+    'word' {
+      $obj.DisplayAlerts = 0
+      $obj.AutomationSecurity = 3          # msoAutomationSecurityForceDisable：强制不跑宏
+      $doc = $obj.Documents.Open($src, $false, $true)
+      $doc.SaveAs([ref]$dst, [ref]$format)
+    }
+    'excel' {
+      $obj.DisplayAlerts = $false
+      $doc = $obj.Workbooks.Open($src, 0, $true)
+      if ($format -eq 0) { $doc.ExportAsFixedFormat(0, $dst) } else { $doc.SaveAs($dst, $format) }
+    }
+    'powerpoint' {
+      $doc = $obj.Presentations.Open($src, $true, $false, $false)
+      $doc.SaveAs($dst, $format)
+    }
+  }
+  exit 0
+} finally { try { $doc.Close(0) } catch {} }
+```
+
+> **错误信息要按 GBK 解**：PowerShell 的输出是本机 OEM/GBK，直接 `.decode("utf-8")` 会乱码。
+> 做两级解码 —— 先试 UTF-8，含替换字符 `�` 则回落 `gb18030`。
+
+### 11.4 另存格式码（`SaveAs` 的第二个参数）
+
+| Word | 码 | Excel | 码 | PowerPoint | 码 |
+|---|---|---|---|---|---|
+| pdf | 17 | pdf | **`ExportAsFixedFormat(0, $dst)`** | pdf | 32 |
+| docx | 16 | xlsx | 51 | pptx | 24 |
+| doc | 0 | xls | 56 | ppt | 1 |
+| rtf | 6 | csv | 6 | | |
+| odt | 23 | html | 44 | | |
+| txt | 7 | | | | |
+| html | 10 | | | | |
+
+两个坑：
+
+- Excel 存 PDF **不走 `SaveAs`**，要用 `ExportAsFixedFormat(0, $dst)`；
+- Word 存 txt 的码 7 产出的是 **UTF-16LE**，交给用户前要自己转成 UTF-8。
+
+### 11.5 ⚠️ 进程回收：这套实现里最要紧的一段
+
+**Office 的 COM 是"多用"（MultiUse）**：`New-Object -ComObject` 很可能不是新开一个 Word，
+而是**挂到用户已经打开的那个 Word 上**。于是：
+
+- 你 `Quit()` → 把用户正在编辑的 Word 关掉了；
+- 你 `$obj.Visible = $false` → 把用户的窗口藏起来了；
+- 你干脆不 Quit → 每次转换留下一个几百 MB 的隐形进程。
+
+> **实测代价：21 个隐形 WINWORD ≈ 5 GB。**
+> 而且只靠 `$obj.Quit()` 是收不干净的 —— 必须自己兜底。
+
+正确做法 —— **前后各拍一次进程快照，只有"本轮新出现的 PID"才归你管**：
+
+```powershell
+$before = @(Get-Process -Name $proc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+$obj = New-Object -ComObject $progId
+
+# 各套件拉起速度差很多（Word 几百 ms，WPS 1~2 s），要轮询，不能一次性 sleep
+$owned = $false
+for ($i = 0; $i -lt 15; $i++) {
+  Start-Sleep -Milliseconds 200
+  if ((@(Get-Process -Name $proc -ErrorAction SilentlyContinue |
+         Where-Object { $before -notcontains $_.Id })).Count -gt 0) { $owned = $true; break }
+}
+
+if ($owned) { $obj.Visible = $false }        # 否则会把用户开着的窗口藏起来
+# ... 打开 → 另存 ...
+# finally:
+if ($owned -and $obj) { $obj.Quit(0) }       # 否则会关掉用户的 Word
+if ($owned) {                                 # Quit 不保证进程真的退出，兜底杀掉自己那几个
+  Start-Sleep -Milliseconds 500
+  Get-Process -Name $proc -ErrorAction SilentlyContinue |
+    Where-Object { $before -notcontains $_.Id } | Stop-Process -Force
+}
+[System.Runtime.InteropServices.Marshal]::ReleaseComObject($obj)
+```
+
+**WPS 的判据要另说**：WPS 会自己拉起一个**常驻后台 `wps.exe`**
+（实测：杀掉后 8 秒内自动重生）。所以自检里**不能**用"残留 wps 进程数 = 0"当判据，
+那会永远失败。只看你自己新起的那批 PID 就行。
+
+### 11.6 PDF → Word 的死锁，以及怎么绕
+
+Word 打开 PDF 时会**拉起一个独立进程 `PDFREFLOW.exe`**，弹一句
+"Word 现在将把 PDF 转换为可编辑的 Word 文档…"，等用户点确认。
+这个框**不在 Word 进程里**，`DisplayAlerts = 0` 管不到它；
+而窗口又被我们设成了不可见 —— 没人能点，于是**永久挂起**（实测 180 秒超时也是它）。
+
+官方认可的抑制开关是注册表：
+
+```
+HKCU:\Software\Microsoft\Office\<版本>\Word\Options\DisableConvertPdfWarning   (REG_DWORD = 1)
+```
+
+**只在"MS Word + 源是 PDF"时临时写入，转换完在 `finally` 里还原**
+（原本没有这个值就把键删掉，别留垃圾）。版本从 `$obj.Version` 拿，**不要写死 `16.0`**。
+
+效果实测：同一条用例，死锁时 180 秒超时失败，加上这段后整个 MS 组从 220 秒降到 48 秒。
+
+### 11.7 WPS 的两条硬限制：在登记时就排除，不要等它报错
+
+WPS 文字（`KWPS.Application`）实测（12.1.0.28043 教育版）：
+
+- **源是 PDF**：`Documents.Open` 返回 Null —— 不支持导入 PDF；
+- **目标是 ODT**：`SaveAs` 会**忽略**格式码 23，产出的其实是 `.doc`
+  （文件头 `d0cf11e0`，和真正的 .doc 一样大 —— **同名不同物**）。
+
+这两条都**不报错**，只会给你一个假文件。所以正确做法是**登记转换时就排除掉**
+（`exclude_sources=('pdf',)` / `exclude_targets=('odt',)`），让这条转换根本不出现在界面上，
+而不是等它运行失败再提示。
+
+### 11.8 MS 优先 / WPS 兜底，以及"兜底路径也要测"
+
+两套都装了就用 MS（版式还原更好、能读 PDF），只有 WPS 时才落到 WPS。
+用转换的 `priority` 表达即可：MS 登记 0，WPS 登记 1，两者都登记同一个 `(源, 目标)`，
+注册表挑"可用且优先级最高"的那个。
+
+**别忘了给兜底路径写独立用例。** 默认永远选 MS，WPS 那条路径不主动逼一下就永远测不到。
+做法：自检里**临时把 MS 那几个引擎标记为不可用**，跑同一批用例，跑完在 `finally` 里恢复。
+
+### 11.9 自检清单
+
+- [ ] `.ps1` 脚本纯 ASCII（含注释），写入时显式 `encoding="ascii"`
+- [ ] 临时脚本文件带 `.ps1` 后缀
+- [ ] 路径全部走命令行参数，不在脚本体里拼
+- [ ] 探测用 `GetTypeFromProgID`，不用 `New-Object`
+- [ ] Office 目录是 glob 出来的，不依赖 PATH
+- [ ] 有 PID 快照 + `$owned` 门控，只回收自己拉起的进程
+- [ ] `finally` 里 `ReleaseComObject` + 还原注册表
+- [ ] PDF → Word 用例真的跑通（不是靠把超时调大来掩盖死锁）
+- [ ] MS 与 WPS 两条路径各自跑过一遍
+- [ ] 跑完后**新起的** Office/WPS PID 已全部回收（WPS 的常驻后台不算）
 
 ---
 
@@ -710,3 +956,7 @@ if __name__ == "__main__":
 
 *StarPort v0.1.0 · 本文档面向 agent，字段与行为严格对齐 `core/registry.py`、
 `core/supervisor.py`、`core/server.py` 的实际实现。*
+
+*§11 是实测记录：在本机 Microsoft Office 16（`WINWORD` / `EXCEL` / `POWERPNT`）与
+WPS Office 12.1.0.28043 教育版（`KWPS.Application` / `KET.Application`）上逐条验证过，
+文中所有"实测"数据都来自那次验证，不是估计。*

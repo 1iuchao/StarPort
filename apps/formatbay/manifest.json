@@ -1,0 +1,22 @@
+{
+  "id": "formatbay",
+  "name": "格式仓",
+  "version": "0.2.0",
+  "type": "webservice",
+  "category": "文件工具",
+  "description": "文件格式转换：图片/文档/表格/PDF/音视频/压缩包/电子书，本地离线，批量处理",
+  "author": "刘超",
+  "icon": "icon.svg",
+  "tags": ["格式转换", "转换", "图片", "PDF", "文档", "表格", "音视频", "压缩包", "离线"],
+  "entry": {
+    "command": ["{python}", "run.py", "--port", "{port}", "--no-browser"],
+    "cwd": "E:/starport-formatbay"
+  },
+  "health": {
+    "path": "/api/health",
+    "timeout": 25,
+    "stdout_port_pattern": "服务已启动：http://127\\.0\\.0\\.1:(\\d+)/"
+  },
+  "view": { "mode": "iframe", "path": "/" },
+  "stop": { "method": "http", "path": "/api/shutdown" }
+}

@@ -207,16 +207,21 @@ a { color: var(--accent); }
   padding: 0 16px;
   min-width: 0;
 }
-.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+.topbar-left > div:last-child { min-width: 0; }
 .cur-icon {
   width: 28px; height: 28px; border-radius: 8px;
   display: grid; place-items: center;
   background: var(--panel-2); border: 1px solid var(--border-soft);
   font-size: 13px; font-weight: 700;
+  flex: 0 0 auto;
 }
-.cur-name { font-weight: 600; font-size: 13.5px; }
-.cur-sub { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
-.topbar-right { display: flex; align-items: center; gap: 6px; }
+.cur-name { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cur-sub { font-size: 11px; color: var(--text-faint); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 右侧动作按钮在窄窗口（Win+←/→ 半屏）里保持单行 —— 默认会被压到
+   文字换行成竖排、撑破 52px 的顶栏 */
+.topbar-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.topbar-right .tbtn, .topbar-right .pill { flex: 0 0 auto; white-space: nowrap; }
 
 .pill {
   font-size: 11px; padding: 3px 9px; border-radius: 999px;
@@ -247,7 +252,17 @@ a { color: var(--accent); }
   /* 圆角独立于材质开关：关掉材质后应用区仍是同一形状，只是没有背景/模糊/描边 */
   border-radius: var(--mat-radius);
 }
-.frame { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+/* ⚠️ color-scheme 这一行不能删。
+   平台根节点声明了 color-scheme:dark，Chromium 会把"色彩方案"传播进子框架；
+   子框架的**已用方案是 dark、且它自己是透明的时候**，浏览器会把这块区域
+   填成不透明的画布色（实测纯白）—— 于是「背景融合」永远看不到平台背景，
+   应用侧再怎么把自己变透明也没用（这一条是实测定位出来的根因）。
+   在 iframe 上显式声明，等于把方案选择权交还给应用文档。 */
+.frame {
+  width: 100%; height: 100%; border: 0; display: block;
+  background: transparent;
+  color-scheme: normal;
+}
 .frame.hidden { visibility: hidden; }
 
 .overlay {
@@ -279,8 +294,10 @@ a { color: var(--accent); }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
 .modal-panel {
   position: relative;
-  width: min(720px, 92vw);
-  max-height: 86vh;
+  /* 固定尺寸：切换「通用 / 应用管理 / 数据与备份 / 关于」时面板不跟着内容
+     忽大忽小地跳 —— 高度写死，内容多了在 .modal-body 里滚。 */
+  width: min(760px, 94vw);
+  height: min(660px, 86vh);
   display: flex; flex-direction: column;
   overflow: hidden;
   /* 背景 / 边框 / 圆角 / 阴影由 .surface 材质层提供，此处不写死 */
@@ -304,7 +321,7 @@ a { color: var(--accent); }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-.modal-body { padding: 16px; overflow-y: auto; }
+.modal-body { flex: 1 1 auto; min-height: 0; padding: 16px; overflow-y: auto; }
 .tabpage { display: none; }
 .tabpage.active { display: block; }
 .modal-body h3 { margin: 0 0 8px; font-size: 13.5px; }
@@ -396,18 +413,51 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .material-name { font-size: 12px; font-weight: 600; }
 .material-en { font-size: 10px; color: var(--text-faint); margin-top: 1px; }
 
-/* ─────────────────────────  背景预设  ───────────────────────── */
-.bg-presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+/* ─────────────────────────  背景选择器  ─────────────────────────
+   两组：平台内置预设 + 「我的背景」（历史上传过的素材）。
+   以前只列出"当前这一个"自定义背景 —— 一旦切到预设，那张图就从列表里消失，
+   想切回去只能重新挑文件。现在 archive 里的素材一直列着，点一下即可切回。 */
+.bg-group { margin-bottom: 10px; }
+.bg-group:last-child { margin-bottom: 0; }
+.bg-group-title {
+  font-size: 11.5px; color: var(--text-faint);
+  margin-bottom: 6px; display: flex; align-items: center; gap: 8px;
+}
+.bg-group-title .count {
+  background: var(--panel-2); border-radius: 999px;
+  padding: 0 6px; font-size: 10.5px;
+}
+.bg-presets { display: flex; gap: 8px; flex-wrap: wrap; }
 .bg-item {
-  width: 70px; height: 46px;
+  position: relative;
+  width: 76px; height: 50px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   cursor: pointer;
   padding: 0;
   overflow: hidden;
+  background: var(--panel-2);
 }
 .bg-item img, .bg-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bg-item.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* 视频素材角标 —— 预览里它是自动播放的，给个"这是视频"的提示 */
+.bg-item .bg-tag {
+  position: absolute; right: 3px; bottom: 3px;
+  font-size: 9px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px;
+  background: rgba(0, 0, 0, .62); color: #fff; pointer-events: none;
+}
+.bg-del {
+  position: absolute; right: 2px; top: 2px;
+  width: 18px; height: 18px; line-height: 1;
+  padding: 0; border: 0; border-radius: 5px;
+  background: rgba(0, 0, 0, .58); color: #fff;
+  font-size: 11px; cursor: pointer;
+  opacity: 0; transition: opacity var(--dur-fast);
+}
+.bg-item:hover .bg-del { opacity: 1; }
+.bg-del:hover { background: var(--danger); }
+.bg-empty { font-size: 11.5px; color: var(--text-faint); }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ─────────────────────────  开关  ───────────────────────── */

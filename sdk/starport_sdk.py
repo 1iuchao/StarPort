@@ -54,16 +54,26 @@ def announce(port_no: int) -> None:
 def serve_static(directory: str | Path, port_no: int = 0,
                  open_browser: bool = False) -> None:
     """最简静态服务：一行把某个目录变成可被星港嵌入的应用。"""
-    import functools
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(directory))
+    root = str(directory)
 
-    class QuietHandler(handler.func):          # type: ignore[misc]
+    class StaticHandler(SimpleHTTPRequestHandler):
+        """⚠️ 别改成 `class X(functools.partial(Handler, directory=...).func)`。
+
+        子类化 `partial.func` 拿到的只是**原类**，partial 里带的关键字参数会被丢掉，
+        于是 `directory` 回落成 None → 按启动时的 CWD 供文件，拷到别处跑就 404。
+        （2026-09-23 实测踩到：服务在项目根目录跑得挺好，换个 cwd 就全 404。）
+        """
+
+        def __init__(self, *args, **kwargs):
+            kwargs["directory"] = root
+            super().__init__(*args, **kwargs)
+
         def log_message(self, fmt, *args):
             pass
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port_no or 0), QuietHandler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port_no or 0), StaticHandler)
     real_port = httpd.server_address[1]
     announce(real_port)
     if open_browser and not in_starport():

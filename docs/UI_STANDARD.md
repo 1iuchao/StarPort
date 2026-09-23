@@ -1,8 +1,15 @@
-# StarPort 界面统一标准（给应用开发者）
+# StarPort 应用接入标准（界面 + 运行时，给应用开发者）
 
-> **目的**：让接入星港的应用在视觉上与平台保持一致，切换材质/基调时能自动跟随。
+> **目的**：让接入星港的应用在视觉上与平台保持一致，切换材质/基调时能自动跟随；
+> 同时在端口、进程、数据这些运行时约定上不跟平台打架。
 > **适用对象**：任何以 `webservice` / `static` 接入的应用。
-> **参考实现**：星港自己的壳就是范例 —— `shell/tokens.css`、`shell/materials.css`、`shell/styles.css`。
+> **参考实现**：星港自己的壳就是范例 —— `shell/tokens.css`、`shell/materials.css`、`shell/styles.css`；
+> 已接入的两个真实应用可直接对照：`E:\Filecleanup`、`E:\starport-formatbay`。
+>
+> **章节导航**：§1~§6 是界面（§2.5 背景融合、§2.6 窄窗适配是踩坑重灾区），
+> §7 是可直接抄的示例，§8 选型，
+> **§9 是运行时约定（端口 / 进程 / 数据）—— 做后端接入时同样要看**，
+> §10 自检清单。
 
 ---
 
@@ -51,6 +58,34 @@ const material = qs.get('sp-material') || 'liquid-glass';
 document.documentElement.dataset.theme = theme;
 if (qs.get('sp-blend') === '1') applyBlend(true);   // 见 §2.5
 ```
+
+#### ⚠️ 这段脚本必须在样式表**之前**、且是同步的
+
+`sp-blend` / `sp-theme` 要在**第一次绘制之前**落到 DOM 上。所以读取参数的那段
+脚本必须放在 `<link rel="stylesheet">` **之前**，同步执行。
+
+放到 `</body>` 前、或等 `DOMContentLoaded`、或用 `defer` 都**晚了** ——
+会先按默认色画一遍再改，肉眼能看到闪一下，融合模式下闪得更明显（先白底再透明）。
+
+```html
+<head>
+  <script>/* ★ 读 sp-* 参数并落到 documentElement.dataset 上 */</script>
+  <link rel="stylesheet" href="styles.css">   <!-- 必须在脚本之后 -->
+</head>
+```
+
+#### 建议在根元素上落的标记（纯约定，方便你自己写 CSS）
+
+| 属性 | 取值 | 说明 |
+|---|---|---|
+| `data-theme` | `dark` \| `light` | 当前基调 |
+| `data-material` | 材质 id | 当前材质 |
+| `data-sp-blend` | `1` \| `0` | 当前是否处于背景融合（透明）状态 |
+| `data-sp-hosted` | `1` \| `0` | 是否被星港托管 |
+
+**融合相关的 CSS 一律挂在 `[data-sp-blend="1"]` 下**（见 §2.5）。
+这样应用脱离星港独立运行时，这些规则一条都不生效，外观完全回到原生 ——
+一份代码两种形态，不需要维护两套样式。
 
 ### 通道 B：postMessage（运行时实时跟随）
 
@@ -134,6 +169,32 @@ const blend = new URLSearchParams(location.search).get('sp-blend') !== '0';
 // （sp-blend 缺省视为开；独立运行时拿不到该参数，也会走"开"）
 ```
 
+### ⚠️ 别把 `color-scheme: dark` 写在 `:root` 上（实测踩过）
+
+一个必须知道的浏览器行为：**子框架的"已用色彩方案是 dark、且它自身背景透明"时，
+Chromium 会把整块画布填成不透明色，平台背景就透不出来了。**
+
+复现（父页任意写 `:root{color-scheme:dark}`）：
+
+```html
+<iframe srcdoc="<body style='background:transparent'></body>"></iframe>
+<!-- 这块区域是不透明白，不是父页背景 -->
+```
+
+后果就是：应用自己明明 `html,body{background:transparent}` 了，星港里看到的
+却是一块白板 —— 很容易误判成"融合没接上"。
+
+**正确做法**：
+
+- 需要深色表单控件 / 滚动条时，把 `color-scheme` 写在 **`body`** 上，不要写 `:root`；
+- 平台侧已经在 `iframe` 上显式声明了 `color-scheme: normal`（见 `shell/styles.css`），
+  你只要不在 `:root` 上再声明一次即可。
+
+```css
+body { color-scheme: dark; }      /* ✅ 安全 */
+:root { color-scheme: dark; }     /* ❌ 融合会失效 */
+```
+
 ### 怎么实现（关键：只让最外层透明）
 
 ```js
@@ -150,7 +211,7 @@ function applyBlend(on) {
 [data-sp-blend="1"] .card { background: var(--sp-panel); }
 ```
 
-**三个必须注意的点**：
+**五条要点（前三条是实测踩出来的坑）**：
 
 1. **不要连内部卡片一起透明**。只让 `html` / `body` 透明即可；
    卡片、工具栏保留自己的底色，形成"浮起"的层次。
@@ -159,6 +220,12 @@ function applyBlend(on) {
    或让承载文字的卡片保留半透明底。
 3. **首屏必须靠 `sp-blend` 参数决定**，不能等 postMessage ——
    否则会先画出自己的底再变透明，肉眼能看到闪一下。
+4. **融合规则一律挂在 `[data-sp-blend="1"]` 下**。应用独立运行（不被托管）时
+   拿不到 `sp-blend`，该选择器不命中，这些规则一条都不生效 ——
+   一份代码两种形态，不用维护两套样式。
+5. **卡片别太实**。`.card` 用 88% 不透明度时背景只透 12%，肉眼等于没融合；
+   实测降到 **66%** 才有明显效果（次要浮层如右键菜单、tooltip 可用 82%，
+   它们面积小、且需要更高可读性）。
 
 ### 与「材质继承」的关系
 
@@ -173,6 +240,33 @@ function applyBlend(on) {
 
 所以**背景融合是材质继承的前提**。`sp-surface` 只是告诉你"当前应用区已被套上平台材质"，
 你可以据此少画一层自己的底、让内容更轻。
+
+---
+
+## §2.6 窄窗与分屏适配（用户按 Win + ←/→ 时就会遇上）
+
+用户把星港窗口贴到半屏是常态，应用区会被压到 **940px 甚至更窄**
+（1920 半屏 = 960，再扣掉侧栏）。布局不设防就会出现"按钮互相压住、标签文字竖着排" ——
+这是验收必查项，也是用户最容易抱怨的一条。
+
+**三条必做**：
+
+1. **顶栏容器允许换行**：`flex-wrap: wrap`，并给可伸缩区 `flex: 1 1 0; min-width: 0`。
+   `min-width: 0` 是关键 —— flex 子项默认 `min-width: auto`，会被内容顶开而不收缩。
+2. **按钮 / 标签不许被压扁**：`flex: 0 0 auto` + `white-space: nowrap`；
+   可截断的文字再配 `overflow: hidden; text-overflow: ellipsis`。
+3. **给窄窗留断点**：建议 1080 / 820 / 620 三档，逐级隐藏次要控件、收起标签文字。
+
+```css
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.toolbar .grow { flex: 1 1 0; min-width: 0; }        /* min-width:0 别漏 */
+.tab { flex: 0 0 auto; white-space: nowrap; }
+.tab-text { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 820px) { .toolbar .secondary { display: none; } }
+```
+
+**不要**把一行用固定 `px` 宽度顶满（必溢出），
+也**不要**靠 `transform: scale()` 缩内容（DPI 下会糊，见 §6）。
 
 ---
 
@@ -304,6 +398,26 @@ function applyBlend(on) {
 <html lang="zh-CN" data-theme="dark" data-material="glassmorphism">
 <head>
 <meta charset="utf-8">
+
+<!-- ★ 首屏引导：必须在样式表之前、且同步执行（见 §1）。
+     放在 </body> 前就晚了 —— 会先按默认色画一遍再改，肉眼看到闪一下。 -->
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var d = document.documentElement;
+  var hosted = qs.get('sp-source') === 'starport' || qs.has('sp-blend');
+
+  d.dataset.spHosted = hosted ? '1' : '0';
+  if (qs.get('sp-theme'))    d.dataset.theme = qs.get('sp-theme');
+  if (qs.get('sp-material')) d.dataset.material = qs.get('sp-material');
+
+  /* sp-blend 缺省视为开（独立运行时拿不到该参数，也走"开"） */
+  var blend = qs.get('sp-blend') !== '0';
+  d.dataset.spBlend = blend ? '1' : '0';
+  /* 怎么透明交给 CSS 的 [data-sp-blend="1"] 规则，这里只落标记 */
+})();
+</script>
+
 <style>
   :root {
     /* 平台通过 postMessage 下发的 token 会覆盖这里 */
@@ -315,6 +429,10 @@ function applyBlend(on) {
     --sp-bg: #f4f6fa; --sp-text: #17202c; --sp-text-dim: #5b6779;
     --sp-accent: #2f6fdb; --sp-border: #dde3ec; --sp-panel: #ffffff;
   }
+  /* ★ color-scheme 只能写 body。写 :root 会让背景融合失效（见 §2.5） */
+  body { color-scheme: dark; }
+  :root[data-theme="light"] body { color-scheme: light; }
+
   body {
     margin: 0; padding: 16px;
     background: var(--sp-bg); color: var(--sp-text);
@@ -327,8 +445,18 @@ function applyBlend(on) {
     backdrop-filter: blur(14px) saturate(140%);
   }
   .dim { color: var(--sp-text-dim); }        /* 实色降级，不用 opacity */
+
+  /* 融合态：让平台背景透出来 —— 用选择器声明即可，
+     不必等 JS 摸到 body（body 在 <head> 里还不存在） */
+  html[data-sp-blend="1"], html[data-sp-blend="1"] body { background: transparent; }
+  [data-sp-blend="1"] .card {
+    background: color-mix(in srgb, var(--sp-panel) 66%, transparent);  /* 66% 是实测有效值 */
+  }
+  [data-sp-blend="1"] body { text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+
   @media (prefers-reduced-transparency: reduce) {
     .card { background: var(--sp-panel); backdrop-filter: none; }
+    [data-sp-blend="1"] .card { background: var(--sp-panel); }
   }
 </style>
 </head>
@@ -339,30 +467,27 @@ function applyBlend(on) {
   </div>
 
 <script>
-/* ① 首屏：从 URL 参数读，避免闪色 */
-const qs = new URLSearchParams(location.search);
+/* ① 首屏已经在 <head> 里做过，这里只处理「运行时的实时变更」 */
 function applyTheme(theme, material, tokens) {
-  if (theme)   document.documentElement.dataset.theme = theme;
-  if (material) document.documentElement.dataset.material = material;
+  const d = document.documentElement;
+  if (theme)    d.dataset.theme = theme;
+  if (material) d.dataset.material = material;
   if (tokens) {
     for (const [k, v] of Object.entries(tokens)) {
-      if (k && v) document.documentElement.style.setProperty(k, v);
+      if (k && v) d.style.setProperty(k, v);
     }
   }
 }
-/* 背景融合：让平台背景透出来（只动最外层） */
+/* 只需切标记，具体怎么透明由 CSS 的 [data-sp-blend="1"] 决定 */
 function applyBlend(on) {
-  document.documentElement.style.background = on ? 'transparent' : '';
-  document.body.style.background = on ? 'transparent' : '';
+  document.documentElement.dataset.spBlend = on ? '1' : '0';
 }
 
-applyTheme(qs.get('sp-theme'), qs.get('sp-material'));
-applyBlend(qs.get('sp-blend') !== '0');        // 缺省视为开
-
-/* ② 运行时：接收平台的实时主题变更 */
+/* ② 接收平台的实时主题 / 融合开关变更 */
 window.addEventListener('message', (e) => {
   const d = e.data;
   if (!d || d.type !== 'starport:theme') return;
+  document.documentElement.dataset.spHosted = '1';
   applyTheme(d.theme, d.material, d.tokens);
   applyBlend(d.blend !== false);
 });
@@ -384,13 +509,90 @@ window.addEventListener('message', (e) => {
 
 ---
 
-## §9 自检清单
+## §9 运行时约定（端口 / 进程 / 数据）
+
+界面之外，这几条决定你的应用能不能被星港**稳定地拉起和收摊**。
+
+### 端口：用平台给你的那个，别自己挑
+
+manifest 的 `entry.command` 里写 `{port}` 占位符，平台会替换成它分配给你的端口：
+
+```json
+"entry": { "command": ["{python}", "run.py", "--port", "{port}", "--no-browser"] }
+```
+
+- 你的程序**必须**接受 `--port` 并在该端口上监听；
+- 该端口由平台分配并保证空闲，直接 bind 即可，**不要再自己"找一个空闲端口"**；
+- 如果你确实换了端口（例如自己做顺延），**必须把最终端口播报出来**：
+
+```python
+print(f"服务已启动：http://127.0.0.1:{real_port}/", flush=True)   # ★ 必须 flush
+```
+
+平台用 `health.stdout_port_pattern` 抓这行来知道你最终落在哪儿。
+不播报就只能靠 `health.path` 轮询，慢且容易误判成启动失败。
+
+> ⚠️ **如果你一定要自己挑端口：必须「边试边绑」，不能「先探后绑」。**
+>
+> 先用一个临时 socket 试绑、关掉、再由服务真绑 —— 中间的缝隙足以让另一个进程抢走
+> 同一个端口，结果就是 `WinError 10048`（实测 12 个并发里挂 5 个，
+> 详见 `docs/ISSUE-port-10048.md`）。
+> 正确做法是让 bind 动作本身承担探测：
+>
+> ```python
+> for p in range(base, base + span):
+>     try:
+>         srv = HTTPServer(("127.0.0.1", p), Handler); break
+>     except OSError:
+>         continue
+> ```
+
+另外：**Windows 下别开 `SO_REUSEADDR`**（Python 的 `allow_reuse_address = True`）。
+它在本平台语义下会撒谎 —— 允许两个进程绑同一端口，反而破坏"占用即顺延"。
+
+### 进程：能被优雅地收摊
+
+- manifest 里声明 `stop: {"method": "http", "path": "/api/shutdown"}` 时，
+  平台退出前会先调它 —— 请在这里存盘、收线程，然后自行退出；
+- 平台用 Job Object 兜底：即使平台被强杀，你的进程也会被 OS 一起回收。
+  所以**不要假设"下次启动时上次的我还活着"**，启动时请容忍脏状态；
+- 反过来也成立：**你的进程不能靠"看不见地活着"**。
+  若你以服务形式常驻，请留一份可发现的痕迹（PID + 端口），并提供关闭入口 ——
+  星港自己的做法是 `data/instances/<port>.json` + `tools/stop_instance.py`。
+
+### 数据：只写平台给你的目录
+
+- 环境变量 `STARPORT_DATA_DIR`（或 SDK 的 `sdk.starport_sdk.data_dir()`）
+  是你的私有目录，平台保证它存在；
+- **不要往应用代码目录里写运行时数据**。应用目录可能被共享或只读，
+  而且把整份 venv / 数据拷进 `apps/<id>/` 只是白白占空间 ——
+  `entry.cwd` 可以直接指向仓库外的真实目录，
+  星港就是这么接 FileCleanup（`E:\Filecleanup`）与格式仓（`E:\starport-formatbay`）的：
+  `apps/<id>/` 下只留 `manifest.json` 和图标，几十 MB 而不是几百 MB。
+
+### 环境变量速查
+
+| 变量 | 含义 |
+|---|---|
+| `STARPORT_APP_ID` | 应用 id |
+| `STARPORT_PORT` | 平台分配的端口 |
+| `STARPORT_DATA_DIR` | 应用私有数据目录（`data/apps-data/<id>/`） |
+| `STARPORT_PLATFORM_URL` | 平台地址（经 manifest 的 `{platform_url}` 占位符传递） |
+
+---
+
+## §10 自检清单
+
+**界面**
 
 - [ ] 首屏从 `sp-theme` / `sp-material` URL 参数初始化，无闪色
+- [ ] 读参数的脚本放在样式表**之前**且同步执行（§1）
 - [ ] 监听 `starport:theme` 消息，切材质/基调时实时跟随
 - [ ] 支持背景融合：首屏读 `sp-blend` 决定透明，避免闪白
 - [ ] 融合模式下**只让 `html`/`body` 透明**，内部卡片保持不透明
-- [ ] 融合模式下正文有 `text-shadow` 或半透明底，保证任意背景下的对比度
+- [ ] 融合规则挂在 `[data-sp-blend="1"]` 下，独立运行时一条都不生效
+- [ ] 融合态卡片透明度 ≈ 66%（不是 88%），正文有 `text-shadow` 或半透明底
+- [ ] `color-scheme` 写在 **`body`** 上，没写在 `:root` 上（§2.5）
 - [ ] 响应 postMessage 里的 `blend` 变化（用户随时可切开关）
 - [ ] 严格三层：材质层不读背景内容，文字不与材质做透明度叠加
 - [ ] 材质参数全部走 CSS 变量，容器不写死数值
@@ -402,6 +604,17 @@ window.addEventListener('message', (e) => {
 - [ ] `prefers-reduced-motion` 下无动效
 - [ ] 100% / 125% / 150% / 200% DPI 下无接缝、无边框断裂
 - [ ] 更换背景（图片/视频）时材质层零改动、无错位
+- [ ] **940px 宽（Win+← 半屏）下顶栏不重叠、标签不竖排**（§2.6）
+
+**运行时**
+
+- [ ] 接受 `{port}` 并在该端口监听，不自己另找端口
+- [ ] 若自行顺延端口，已 `flush` 播报 `服务已启动：http://127.0.0.1:<port>/`
+- [ ] 若自行挑端口，用的是"边试边绑"而不是"先探后绑"
+- [ ] 未开启 `SO_REUSEADDR`（Windows 下会破坏"占用即顺延"）
+- [ ] manifest 声明了 `stop`，优雅收摊时存盘并退出
+- [ ] 运行时数据只写 `STARPORT_DATA_DIR`，不写应用代码目录
+- [ ] `apps/<id>/` 下只有 `manifest.json` 和图标，没有把整个仓库拷贝进去
 
 ---
 
