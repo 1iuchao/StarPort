@@ -30,7 +30,7 @@
 平台打开应用时，会在你的地址后追加参数：
 
 ```
-http://127.0.0.1:19100/?sp-theme=dark&sp-material=liquid-glass&sp-source=starport
+http://127.0.0.1:19100/?sp-theme=dark&sp-material=liquid-glass&sp-source=starport&sp-blend=1&sp-surface=1
 ```
 
 | 参数 | 取值 | 说明 |
@@ -38,14 +38,18 @@ http://127.0.0.1:19100/?sp-theme=dark&sp-material=liquid-glass&sp-source=starpor
 | `sp-theme` | `dark` \| `light` | 当前基调 |
 | `sp-material` | 见 §3 的 10 个 id | 当前材质 |
 | `sp-source` | `starport` | 存在即表示"被星港托管"，可据此切换独立/托管模式 |
+| `sp-blend` | `1` \| `0` | **背景融合**：`1` = 请你把自身背景透明，让星港的背景透出来 |
+| `sp-surface` | `1` \| `0` | **材质继承**：`1` = 应用区已套用星港材质，你的内容可以只留文字与控件 |
 
 **为什么用 URL 而不是接口**：应用首屏渲染前就能读到，避免"先按默认色画一遍、再闪一下变色"的割裂感。且没有跨域/CORS 问题。
+`sp-blend` 尤其必须在首屏读到 —— 否则会先画出自己的底、再变透明，肉眼能看到闪一下。
 
 ```js
 const qs = new URLSearchParams(location.search);
 const theme = qs.get('sp-theme') || 'dark';
 const material = qs.get('sp-material') || 'liquid-glass';
 document.documentElement.dataset.theme = theme;
+if (qs.get('sp-blend') === '1') applyBlend(true);   // 见 §2.5
 ```
 
 ### 通道 B：postMessage（运行时实时跟随）
@@ -56,11 +60,14 @@ document.documentElement.dataset.theme = theme;
 window.addEventListener('message', (e) => {
   const d = e.data;
   if (!d || d.type !== 'starport:theme') return;
-  // d.version  1
-  // d.theme    'dark' | 'light'
-  // d.material 'liquid-glass' | ...
-  // d.tokens   { '--sp-bg': '#0e1116', '--sp-text': '...', ... }
+  // d.version         1
+  // d.theme           'dark' | 'light'
+  // d.material        'liquid-glass' | ...
+  // d.blend           true | false   —— 是否请应用透明（背景融合）
+  // d.materialInherit true | false   —— 是否套用了平台材质
+  // d.tokens          { '--sp-bg': '#0e1116', '--sp-text': '...', ... }
   applyTheme(d.theme, d.material, d.tokens);
+  applyBlend(!!d.blend);              // 见 §2.5
 });
 ```
 
@@ -101,6 +108,71 @@ GET http://127.0.0.1:19000/api/theme
 1. **材质层不得读取背景内容**。不许把背景图当纹理采样、不许按背景计算 UV 偏移、不许为某张背景单独烘焙贴图。材质只允许通过 `backdrop-filter` 这种浏览器原生能力"感知"背后有什么。
 2. **内容层文字永远是实色**（允许轻微 `text-shadow`）。**绝不**把文字放进半透明层里靠整体 `opacity` 调节 —— 那会让文字随材质透明度一起糊掉。
 3. **材质参数全部走 CSS 变量**，容器只消费变量，不写死数值。
+
+---
+
+## §2.5 背景融合模式（可选，但效果最好）
+
+### 它解决什么
+
+默认情况下，应用自己画背景，于是平台里会出现"外壳是玻璃、主区是一块白板"的割裂感。
+
+星港提供「背景融合」开关：**开启时希望你把自身背景设为透明**，
+这样应用区域会直接透出星港的背景（图片/视频）和材质，
+而且因为 iframe 就渲染在平台的坐标空间里，**画面是连贯的一整张，不是两边拼接**。
+
+> 原理上只有这一条路走得通。另一种想法是"平台把背景图 URL 发给应用、应用自己画"
+> —— 实测不可行：两个区域各自 `object-fit: cover`，图片会被各自裁切，
+> 接缝处直接断开。只适合纯色或无缝图案。
+> 而且平台换背景时还得逐个通知，透明方案则**完全不需要通知**。
+
+### 怎么判定要不要透明
+
+```js
+const blend = new URLSearchParams(location.search).get('sp-blend') !== '0';
+// 运行时变化走 postMessage 的 d.blend
+// （sp-blend 缺省视为开；独立运行时拿不到该参数，也会走"开"）
+```
+
+### 怎么实现（关键：只让最外层透明）
+
+```js
+function applyBlend(on) {
+  document.documentElement.style.background = on ? 'transparent' : '';
+  document.body.style.background = on ? 'transparent' : '';
+  document.documentElement.dataset.spBlend = on ? '1' : '0';
+}
+```
+
+```css
+/* 应用内部的卡片 / 工具栏保持不透明 —— 观感是"应用的卡片浮在平台背景上"，
+   比整页透明更耐看，也更好保证文字可读。 */
+[data-sp-blend="1"] .card { background: var(--sp-panel); }
+```
+
+**三个必须注意的点**：
+
+1. **不要连内部卡片一起透明**。只让 `html` / `body` 透明即可；
+   卡片、工具栏保留自己的底色，形成"浮起"的层次。
+2. **对比度责任转移到你身上**。背景可能是任意图片或视频，你那句文字
+   可能正好压在最亮的区域。融合模式下请给正文加轻微 `text-shadow`，
+   或让承载文字的卡片保留半透明底。
+3. **首屏必须靠 `sp-blend` 参数决定**，不能等 postMessage ——
+   否则会先画出自己的底再变透明，肉眼能看到闪一下。
+
+### 与「材质继承」的关系
+
+星港还有一个「材质继承」开关（`sp-surface` / `d.materialInherit`）：
+
+| 背景融合 | 材质继承 | 应用区实际效果 |
+|---|---|---|
+| 开 | 开 | 平台背景 + 平台材质 —— 完全一体 |
+| 开 | 关 | 平台背景，但不加材质层（纯净背景） |
+| 关 | 开 | 被应用自己的底盖住，**材质开关看不见效果** |
+| 关 | 关 | 完全独立（就是默认那种样子） |
+
+所以**背景融合是材质继承的前提**。`sp-surface` 只是告诉你"当前应用区已被套上平台材质"，
+你可以据此少画一层自己的底、让内容更轻。
 
 ---
 
@@ -278,13 +350,21 @@ function applyTheme(theme, material, tokens) {
     }
   }
 }
+/* 背景融合：让平台背景透出来（只动最外层） */
+function applyBlend(on) {
+  document.documentElement.style.background = on ? 'transparent' : '';
+  document.body.style.background = on ? 'transparent' : '';
+}
+
 applyTheme(qs.get('sp-theme'), qs.get('sp-material'));
+applyBlend(qs.get('sp-blend') !== '0');        // 缺省视为开
 
 /* ② 运行时：接收平台的实时主题变更 */
 window.addEventListener('message', (e) => {
   const d = e.data;
   if (!d || d.type !== 'starport:theme') return;
   applyTheme(d.theme, d.material, d.tokens);
+  applyBlend(d.blend !== false);
 });
 </script>
 </body>
@@ -308,6 +388,10 @@ window.addEventListener('message', (e) => {
 
 - [ ] 首屏从 `sp-theme` / `sp-material` URL 参数初始化，无闪色
 - [ ] 监听 `starport:theme` 消息，切材质/基调时实时跟随
+- [ ] 支持背景融合：首屏读 `sp-blend` 决定透明，避免闪白
+- [ ] 融合模式下**只让 `html`/`body` 透明**，内部卡片保持不透明
+- [ ] 融合模式下正文有 `text-shadow` 或半透明底，保证任意背景下的对比度
+- [ ] 响应 postMessage 里的 `blend` 变化（用户随时可切开关）
 - [ ] 严格三层：材质层不读背景内容，文字不与材质做透明度叠加
 - [ ] 材质参数全部走 CSS 变量，容器不写死数值
 - [ ] 亮色下白边/白高光已替换为深色内阴影 + 冷灰边线

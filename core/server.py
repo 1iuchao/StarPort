@@ -284,6 +284,9 @@ class Handler(BaseHTTPRequestHandler):
                 "version": 1,
                 "theme": p.get("theme", "dark"),
                 "material": p.get("material", "liquid-glass"),
+                # 应用区融合开关（含义见 docs/UI_STANDARD.md §1）
+                "blend": p.get("appBlend", True) is not False,
+                "materialInherit": p.get("appMaterial", True) is not False,
                 "materials": ["liquid-glass", "glassmorphism", "acrylic", "mica",
                               "neumorphism", "claymorphism", "holographic",
                               "liquid-metal", "brushed-metal", "aurora-glass"],

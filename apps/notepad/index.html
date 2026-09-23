@@ -1,37 +1,92 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark" data-sp-blend="0">
 <head>
 <meta charset="utf-8">
 <title>星港便笺</title>
 <style>
-  :root { color-scheme: dark; }
+  /* ── 设计 token：默认值供"独立运行"时使用，被星港托管时由平台下发覆盖 ──
+     这是 docs/UI_STANDARD.md §7 的实践样板。 */
+  :root {
+    color-scheme: dark;
+    --sp-bg: #0e1116;
+    --sp-panel: #171d27;
+    --sp-border: #262e3b;
+    --sp-text: #e6ebf2;
+    --sp-text-dim: #8b97a8;
+    --sp-text-faint: #5f6b7d;
+    --sp-accent: #6ea8fe;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+    --sp-bg: #f4f6fa;
+    --sp-panel: #ffffff;
+    --sp-border: #dde3ec;
+    --sp-text: #17202c;
+    --sp-text-dim: #5b6779;
+    --sp-text-faint: #8a95a6;
+    --sp-accent: #2f6fdb;
+  }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     display: flex; flex-direction: column;
-    background: #0e1116; color: #e6ebf2;
+    background: var(--sp-bg); color: var(--sp-text);
     font: 14px/1.6 "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    transition: background var(--dur, .2s);
   }
+
+  /* ── 背景融合（docs/UI_STANDARD.md §2.5）─────────────────────────────
+     只让最外层透明，让星港的背景与材质透出来；
+     内部工具栏与正文区保留自己的底，形成"卡片浮在背景上"的层次 ——
+     这样既好看，又能保证任意背景下的文字可读性。 */
+  [data-sp-blend="1"] body { background: transparent; }
+
   header {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px; border-bottom: 1px solid #262e3b;
-    background: #131820;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--sp-border);
+    background: var(--sp-panel);
+  }
+  [data-sp-blend="1"] header {
+    /* 融合时改用半透明底：既能透出一点平台背景，又保住工具栏可读性 */
+    background: color-mix(in srgb, var(--sp-panel) 78%, transparent);
   }
   header h1 { margin: 0; font-size: 14px; font-weight: 650; }
   .spacer { flex: 1; }
-  .stat { font-size: 12px; color: #8b97a8; }
+  .stat { font-size: 12px; color: var(--sp-text-dim); }
   button {
-    border: 1px solid #262e3b; background: #171d27; color: #8b97a8;
+    border: 1px solid var(--sp-border);
+    background: var(--sp-panel);
+    color: var(--sp-text-dim);
     padding: 4px 10px; border-radius: 7px; cursor: pointer;
   }
-  button:hover { color: #e6ebf2; border-color: #6ea8fe; }
+  button:hover { color: var(--sp-text); border-color: var(--sp-accent); }
+
   textarea {
     flex: 1; width: 100%; resize: none;
     padding: 14px 16px; border: 0; outline: none;
-    background: #0e1116; color: #e6ebf2;
+    background: var(--sp-bg); color: var(--sp-text);
     font: 14px/1.75 "Cascadia Mono", Consolas, monospace;
   }
-  .tip { padding: 6px 14px; font-size: 11.5px; color: #5f6b7d; border-top: 1px solid #262e3b; }
+  /* 融合模式下正文区给一层半透明底 —— 否则文字会直接压在任意背景上，
+     遇到亮背景就读不清了（这是标准里强调的"对比度责任"）。 */
+  [data-sp-blend="1"] textarea {
+    background: color-mix(in srgb, var(--sp-bg) 62%, transparent);
+  }
+
+  .tip {
+    padding: 6px 14px; font-size: 11.5px;
+    color: var(--sp-text-faint); border-top: 1px solid var(--sp-border);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    /* 系统要求减少透明时，一律退回不透明底 */
+    [data-sp-blend="1"] body,
+    [data-sp-blend="1"] header,
+    [data-sp-blend="1"] textarea { background: var(--sp-bg); }
+    [data-sp-blend="1"] header { background: var(--sp-panel); }
+  }
 </style>
 </head>
 <body>
@@ -43,9 +98,43 @@
   <button id="clear">清空</button>
 </header>
 <textarea id="ta" placeholder="随手记点什么…（自动保存到浏览器本地）" spellcheck="false"></textarea>
-<div class="tip">static 型应用示例：没有后端进程，数据存 localStorage，全部离线。</div>
+<div class="tip">
+  static 型应用示例 · 无后端进程 · 数据存 localStorage ·
+  已按 <b>UI 标准</b>接入：跟随星港的基调 / 材质 / 背景融合
+</div>
 
 <script>
+  /* ═══ 主题接入（docs/UI_STANDARD.md §1）═══════════════════════════════ */
+  const root = document.documentElement;
+
+  function applyTheme(theme, tokens) {
+    if (theme) root.dataset.theme = theme;
+    if (tokens) {
+      for (const [k, v] of Object.entries(tokens)) {
+        if (k && v) root.style.setProperty(k, v);
+      }
+    }
+  }
+
+  /* 背景融合：只切最外层与"需要透出的那一层"，内部卡片不跟着透明 */
+  function applyBlend(on) {
+    root.dataset.spBlend = on ? '1' : '0';
+  }
+
+  /* ① 首屏：必须从 URL 参数读，否则会先画出自己的底再变透明，肉眼能看到闪一下 */
+  const qs = new URLSearchParams(location.search);
+  applyTheme(qs.get('sp-theme') || undefined, undefined);
+  applyBlend(qs.get('sp-blend') !== '0');        // 缺省视为开
+
+  /* ② 运行时：接收平台推送的主题/融合变化 */
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.type !== 'starport:theme') return;
+    applyTheme(d.theme, d.tokens);
+    applyBlend(d.blend !== false);
+  });
+
+  /* ═══ 便笺本体（与主题无关）══════════════════════════════════════════ */
   const KEY = 'starport.notepad.content';
   const ta = document.getElementById('ta');
   const stat = document.getElementById('stat');

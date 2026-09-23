@@ -126,6 +126,32 @@
           <input id="bg-file" type="file" accept="image/*,video/*" hidden>
           <p class="hint">背景可随时替换，材质层与内容层完全不参与背景计算</p>
         </div>
+
+        <div class="row">
+          <label>应用区融合</label>
+          <div class="switches">
+            <label class="sw">
+              <input type="checkbox" id="s-blend" checked>
+              <span class="sw-body">
+                <b>背景融合</b>
+                <i>应用区透出星港的背景与材质，视觉上连成一片</i>
+              </span>
+            </label>
+            <label class="sw">
+              <input type="checkbox" id="s-appmat" checked>
+              <span class="sw-body">
+                <b>材质继承</b>
+                <i>应用区套用星港当前的材质；关闭则只保留纯背景</i>
+              </span>
+            </label>
+          </div>
+          <p class="hint">
+            这两项<b>需要应用侧配合</b>（把自身背景设为透明）才会生效，
+            不配合的应用不受影响、仍是自己的外观。
+            「背景融合」是「材质继承」的前提 —— 应用不透明时材质开关看不到效果。
+            接法见 <code>docs/UI_STANDARD.md</code>。
+          </p>
+        </div>
         <div class="row">
           <label for="s-window">窗口模式</label>
           <select id="s-window">

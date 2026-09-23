@@ -319,14 +319,42 @@ E:/Python312/python.exe run.py --port 19500   # 指定端口
 ### 让其他应用也跟随平台主题
 
 平台**无法**从外部给应用注入样式（iframe 跨域，浏览器安全模型决定），
-所以统一视觉靠约定，两条通道已经打通：
+所以统一视觉靠约定，通道已经打通：
 
 1. **URL 参数** —— 平台打开应用时注入
-   `?sp-theme=dark&sp-material=liquid-glass&sp-source=starport`（应用首屏即可读到，无闪色）
-2. **postMessage** —— 运行时主题变更时推送 `{type:'starport:theme', theme, material, tokens}`
+   `?sp-theme=dark&sp-material=liquid-glass&sp-source=starport&sp-blend=1&sp-surface=1`
+   （应用首屏即可读到，无闪色）
+2. **postMessage** —— 运行时变更时推送
+   `{type:'starport:theme', theme, material, blend, materialInherit, tokens}`
+3. **`GET /api/theme`** —— 开放 CORS，供应用主动拉取主题标识
 
-应用侧的完整接法、token 对照表、性能红线与自检清单见
+### 应用区融合（两个开关）
+
+设置面板里的「应用区融合」控制应用区域是否与平台连成一片：
+
+| 开关 | 作用 |
+|---|---|
+| **背景融合**（`sp-blend`） | 请应用把自身背景设为透明，让平台的背景/材质透出来 |
+| **材质继承**（`sp-surface`） | 应用区套用平台材质；关闭则只保留纯背景 |
+
+两个状态都**需要应用配合**（把 `html`/`body` 设为 `transparent`）才会生效 ——
+不配合的应用不受影响，仍是自己的外观。**背景融合是材质继承的前提**：
+应用不透明时，材质层会被完全盖住。
+
+实测效果（内置「星港便笺」已按标准接入，可作范例）：
+
+| 状态 | 应用区表现 |
+|---|---|
+| 融合开 | 透出平台背景光斑，与外壳连成一片 |
+| 融合关 | 恢复应用自己的底色，与平台各自独立 |
+| 融合开 + 材质关 | 透出背景但无材质层（更清透） |
+
+> 走这条路的原因：iframe 就渲染在平台的坐标空间里，透明后看到的**是同一张背景**，
+> 画面连贯。而"平台把背景图发给应用自己画"会导致两个区域各自裁切、接缝断开。
+
+应用侧的完整接法、token 对照表、融合模式要点、性能红线与自检清单见
 **[`docs/UI_STANDARD.md`](docs/UI_STANDARD.md)**。
+内置范例见 `apps/notepad/index.html`。
 
 ---
 

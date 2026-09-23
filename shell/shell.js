@@ -353,6 +353,8 @@ function fillSettings() {
   renderAppAdmin();
   renderMaterialGrid();
   renderBgPresets();
+  $('#s-blend').checked = appBlendOn();
+  $('#s-appmat').checked = appMaterialOn();
 }
 
 function renderSysInfo() {
@@ -443,6 +445,18 @@ async function saveSettings() {
   fillSettings();
 }
 
+/* 应用区融合的两项开关（默认都开）。
+   注意它们的因果顺序：应用若不透明，材质层会被 iframe 完全盖住 ——
+   所以「背景融合」是「材质继承」的前提，关闭后者只在应用透明时看得出效果。 */
+function appBlendOn() {
+  const p = S.settings.platform || {};
+  return p.appBlend !== false;
+}
+function appMaterialOn() {
+  const p = S.settings.platform || {};
+  return p.appMaterial !== false;
+}
+
 function applyTheme() {
   const p = S.settings.platform || {};
   const root = document.documentElement;
@@ -450,6 +464,12 @@ function applyTheme() {
   const mat = p.material || 'liquid-glass';
   root.dataset.material = MATERIALS.some(m => m.id === mat) ? mat : 'liquid-glass';
   applyBackground(p.background || BG_DEFAULT);
+
+  /* 应用区材质：控制 .stage 是否挂 .surface。
+     摘掉之后 stage 退化为纯透明，应用区只会露出第 0 层背景（= 只要背景、不要材质）。 */
+  const stage = document.querySelector('.stage');
+  if (stage) stage.classList.toggle('surface', appMaterialOn());
+
   pushThemeToApp();
 }
 
@@ -488,6 +508,9 @@ function pushThemeToApp() {
       version: 1,
       theme: p.theme || 'dark',
       material: p.material || 'liquid-glass',
+      /* 融合开关：应用据此决定"让自身背景透明、透出平台"还是"保持自己的外观" */
+      blend: appBlendOn(),
+      materialInherit: appMaterialOn(),
       tokens: currentTokens(),
     }, '*');
   } catch (_) {
@@ -505,6 +528,9 @@ function withThemeParams(rawUrl) {
     u.searchParams.set('sp-theme', p.theme || 'dark');
     u.searchParams.set('sp-material', p.material || 'liquid-glass');
     u.searchParams.set('sp-source', 'starport');
+    /* 首屏就要能判断要不要透明 —— 否则会先按自己的底画一遍再变透明，闪一下 */
+    u.searchParams.set('sp-blend', appBlendOn() ? '1' : '0');
+    u.searchParams.set('sp-surface', appMaterialOn() ? '1' : '0');
     return u.toString();
   } catch (_) {
     return rawUrl;
@@ -727,6 +753,23 @@ function bind() {
   };
   $('#btn-install').onclick = doInstall;
   $('#btn-reload').onclick = async () => { await reloadApps(); renderNav(); renderAppAdmin(); };
+
+  /* ---- 应用区融合开关：即时生效并推给已打开的应用 ---- */
+  $('#s-blend').onchange = (e) => {
+    S.settings.platform = S.settings.platform || {};
+    S.settings.platform.appBlend = e.target.checked;
+    /* 刻意不重载 iframe：重载会丢掉用户在应用里的操作状态。
+       改为靠 postMessage 让应用自己切换（见 UI_STANDARD），应用没实现监听则
+       下次打开该应用时才生效 —— 这是可接受的降级，不该用"打断用户"来兜底。 */
+    applyTheme();
+    quickSave();
+  };
+  $('#s-appmat').onchange = (e) => {
+    S.settings.platform = S.settings.platform || {};
+    S.settings.platform.appMaterial = e.target.checked;
+    applyTheme();
+    quickSave();
+  };
 
   /* ---- 背景：本地文件 → 交给平台托管（前端不直接读本地路径） ---- */
   $('#btn-bg-file').onclick = () => $('#bg-file').click();
