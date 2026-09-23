@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 import os
@@ -33,6 +34,13 @@ MIME_FIX = {
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
 }
+
+# 背景素材白名单：只接受这些扩展名，避免变成一个"任意文件"端点
+ALLOWED_BG_EXT = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp",
+    ".mp4", ".webm", ".mov", ".m4v",
+}
+MAX_BG_BYTES = 40 * 1024 * 1024          # 单张背景上限 40MB
 
 
 class PlatformContext:
@@ -77,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # ------------------------------------------------------------ 工具
-    def _json(self, data: Any, code: int = 200) -> None:
+    def _json(self, data: Any, code: int = 200, cors: bool = False) -> None:
         try:
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         except Exception as exc:                       # 序列化失败也要给响应
@@ -87,6 +95,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cors:
+            # 仅对被托管应用需要主动拉取的少数端点开放；其余端点保持同源限制
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         try:
             self.wfile.write(body)
@@ -216,6 +227,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/shell/"):
             return self._file(paths.SHELL_DIR / unquote(path[len("/shell/"):]))
 
+        # ---- 背景素材（第 0 层的图片/视频，由平台托管）
+        if path.startswith("/_bg/"):
+            name = os.path.basename(unquote(path[len("/_bg/"):]))
+            target = (paths.BACKGROUND_DIR / name).resolve()
+            if not str(target).startswith(str(paths.BACKGROUND_DIR.resolve())):
+                return self._json({"ok": False, "error": "非法路径"}, 403)
+            return self._file(target, cache="public, max-age=86400")
+
         # ---- 应用静态资源（图标 / static 型应用页面）
         if path.startswith("/_apps/"):
             rest = unquote(path[len("/_apps/"):])
@@ -255,6 +274,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "settings": CONFIG.data})
         if path == "/api/state":
             return self._json({"ok": True, "state": STATE.data})
+        if path == "/api/theme":
+            # 供被托管的应用跨域拉取当前主题（见 docs/UI_STANDARD.md §1 通道 C）。
+            # 只暴露"主题标识"，不含具体色值 —— 色值标准见 UI_STANDARD 的 token 表，
+            # 由应用侧映射，避免平台与应用的色板出现两份真源。
+            p = CONFIG.platform
+            return self._json({
+                "ok": True,
+                "version": 1,
+                "theme": p.get("theme", "dark"),
+                "material": p.get("material", "liquid-glass"),
+                "materials": ["liquid-glass", "glassmorphism", "acrylic", "mica",
+                              "neumorphism", "claymorphism", "holographic",
+                              "liquid-metal", "brushed-metal", "aurora-glass"],
+            }, cors=True)
+        if path == "/api/background/list":
+            paths.ensure_dirs()
+            items = []
+            for f in sorted(paths.BACKGROUND_DIR.iterdir(), reverse=True):
+                if f.is_file() and f.suffix.lower() in ALLOWED_BG_EXT:
+                    items.append({
+                        "file": f.name,
+                        "url": f"/_bg/{f.name}",
+                        "size": f.stat().st_size,
+                        "kind": "video" if f.suffix.lower() in
+                                (".mp4", ".webm", ".mov", ".m4v") else "image",
+                    })
+            return self._json({"ok": True, "items": items})
         if path == "/api/system":
             from . import autostart, hotkey, window
             return self._json({
@@ -357,6 +403,37 @@ class Handler(BaseHTTPRequestHandler):
             if CTX.apply_runtime:
                 CTX.apply_runtime()
             return self._json({"ok": True, "settings": CONFIG.data})
+
+        if path == "/api/background/upload":
+            # 背景由平台落盘托管，而不是让前端去读任意本地路径 ——
+            # 这样 /_bg/ 只可能读到 data/background/ 里的文件。
+            name = str(data.get("filename") or "bg")
+            b64 = str(data.get("data") or "")
+            if not b64:
+                return self._json({"ok": False, "error": "缺少文件内容"}, 400)
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in ALLOWED_BG_EXT:
+                allowed = " ".join(sorted(ALLOWED_BG_EXT))
+                return self._json(
+                    {"ok": False, "error": f"不支持的格式 {ext or '(无扩展名)'}；允许：{allowed}"},
+                    400)
+            try:
+                raw = base64.b64decode(b64, validate=True)
+            except Exception as exc:
+                return self._json({"ok": False, "error": f"不是合法 base64：{exc}"}, 400)
+            if len(raw) > MAX_BG_BYTES:
+                return self._json(
+                    {"ok": False,
+                     "error": f"文件 {len(raw) // 1024 // 1024}MB，超过上限 "
+                              f"{MAX_BG_BYTES // 1024 // 1024}MB"}, 413)
+            paths.ensure_dirs()
+            stored = f"bg-{int(time.time())}{ext}"
+            try:
+                (paths.BACKGROUND_DIR / stored).write_bytes(raw)
+            except Exception as exc:
+                return self._json({"ok": False, "error": f"写入失败：{exc}"}, 500)
+            return self._json({"ok": True, "file": stored,
+                               "url": f"/_bg/{stored}", "size": len(raw)})
 
         if path == "/api/state":
             patch = data.get("patch") or {}

@@ -79,9 +79,12 @@ StarPort/
 │   └── autostart.py        # 开机自启（HKCU Run，无需管理员权限）
 │
 ├── shell/                  # 界面壳（原生 HTML/CSS/JS，无构建）
-│   ├── index.html
-│   ├── styles.css          # CSS 变量驱动主题（深色 / 浅色）
-│   └── shell.js
+│   ├── index.html          #   结构：严格三层（背景 / 材质 / 内容）
+│   ├── tokens.css          #   ★ 设计 token：基础色板 + 亮暗两套基调
+│   ├── materials.css       #   ★ 10 套页面材质的变量定义与伪元素实现
+│   ├── styles.css          #   布局与组件装配（只消费变量，不写死数值）
+│   ├── shell.js            #   交互 + 材质/背景/基调切换
+│   └── material-preview.html  # 材质总览页（调试用，一屏对比 10 套）
 │
 ├── apps/                   # 已安装应用（一个目录 = 一个插件）
 │   ├── filecleanup/        #   manifest.json + icon.svg
@@ -93,6 +96,7 @@ StarPort/
 ├── tools/check_isolation.py # 隔离自检：验证孤儿回收真的生效
 ├── docs/
 │   ├── AGENT_GUIDE.md      # ★ 应用接入开发规范（给 agent / 开发者的）
+│   ├── UI_STANDARD.md      # ★ 界面统一标准（让其他应用跟随平台主题）
 │   └── ...
 │
 └── data/                   # 运行时数据（唯一真源，可整个拷走）
@@ -275,7 +279,58 @@ E:/Python312/python.exe run.py --port 19500   # 指定端口
 
 ---
 
-## 七、已知边界
+## 七、界面与材质系统
+
+页面严格分三层，层级职责不混：
+
+```
+第 0 层  background  ——  渐变 / 图片 / 视频，可运行时替换
+第 1 层  material    ——  10 套材质（半透明 + 模糊 + 高光 + 噪点 + 阴影 + 描边）
+第 2 层  content     ——  文字、按钮、图标等真实内容
+```
+
+**10 套材质**（设置面板里一键切换，即时生效）：
+
+液态玻璃 · 玻璃拟态 · 亚克力 · 云母 · 新拟物 · 粘土拟态 ·
+全息虹彩 · 液态金属 · 磨砂金属 · 极光玻璃
+
+× **亮/暗两套基调** = 20 种组合。
+
+**实现取向**：
+
+| 约束 | 做法 |
+|---|---|
+| 只要"像"，不要真 | 全部靠 CSS 渐变 / 阴影 / `mix-blend-mode` 伪造 |
+| 禁止实时渲染管线 | 无 WebGL / WebGPU / Canvas / Shader / 背景采样 |
+| 禁止系统级透明 | 不用 `vibrancy` / `acrylic` / `DwmSetWindowAttribute`，窗口背景自己画 |
+| 允许低成本能力 | 使用浏览器原生 `backdrop-filter`（同屏模糊元素 ≤ 3 个） |
+| 材质与背景解耦 | 材质只靠 `backdrop-filter` 感知背后，从不读背景内容 |
+| 文字永不透明叠加 | 材质装饰层走 `::before/::after` + `z-index:-1`，落在内容之下 |
+
+**架构要点**：10 套材质 × 2 套基调 **只需维护 12 份定义** ——
+材质只写一遍变量，亮暗差异由基调层的"材质输入变量"承载（见 `shell/tokens.css`）。
+加第 11 套材质只需要加一段变量，不动任何选择器逻辑。
+
+**可访问性**：`prefers-reduced-transparency` 下全部降级为不透明纯色并关闭模糊；
+`prefers-reduced-motion` 下关闭呼吸动效；文字保持实色。
+
+**预览**：`http://127.0.0.1:19000/shell/material-preview.html?theme=dark|light`
+
+### 让其他应用也跟随平台主题
+
+平台**无法**从外部给应用注入样式（iframe 跨域，浏览器安全模型决定），
+所以统一视觉靠约定，两条通道已经打通：
+
+1. **URL 参数** —— 平台打开应用时注入
+   `?sp-theme=dark&sp-material=liquid-glass&sp-source=starport`（应用首屏即可读到，无闪色）
+2. **postMessage** —— 运行时主题变更时推送 `{type:'starport:theme', theme, material, tokens}`
+
+应用侧的完整接法、token 对照表、性能红线与自检清单见
+**[`docs/UI_STANDARD.md`](docs/UI_STANDARD.md)**。
+
+---
+
+## 八、已知边界
 
 - `static` 型应用由平台进程托管静态文件，**隔离弱于** webservice 型（若需要强隔离，
   用 `sdk/starport_sdk.py` 的 `serve_static()` 把它变成 webservice）；

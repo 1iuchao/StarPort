@@ -23,6 +23,7 @@ APPS_DIR = ROOT / "apps"
 DATA_DIR = ROOT / "data"
 LOG_DIR = DATA_DIR / "logs"
 APP_DATA_DIR = DATA_DIR / "apps-data"          # 各应用私有数据根目录
+BACKGROUND_DIR = DATA_DIR / "background"       # 第 0 层背景素材（图片/视频）
 SHELL_DIR = ROOT / "shell"
 SDK_DIR = ROOT / "sdk"
 
@@ -34,7 +35,7 @@ EDGE_PROFILE = DATA_DIR / "shell-profile"      # Edge --app 模式独立 profile
 
 def ensure_dirs() -> None:
     """保证运行时目录存在（首次启动自动创建）。"""
-    for d in (APPS_DIR, DATA_DIR, LOG_DIR, APP_DATA_DIR, SHELL_DIR):
+    for d in (APPS_DIR, DATA_DIR, LOG_DIR, APP_DATA_DIR, BACKGROUND_DIR, SHELL_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

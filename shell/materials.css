@@ -1,0 +1,310 @@
+/* ============================================================================
+   StarPort 材质层（第 1 层）
+   ----------------------------------------------------------------------------
+   设计原则：
+     · 容器（.surface）只有一份实现，只消费 --mat-* 变量；
+     · 每套材质只定义变量，不写选择器逻辑 —— 加第 11 套材质只需加一段变量；
+     · 所有视觉效果靠 CSS 渐变 / 阴影 / 混合模式伪造，
+       无 WebGL / Canvas / Shader / 系统透明窗口 API；
+     · 材质不感知背景内容，换背景图/视频时材质层零改动。
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   默认材质（未指定 data-material 时的兜底，等价于轻玻璃）
+   --------------------------------------------------------------------------- */
+:root {
+  --mat-bg: linear-gradient(135deg, var(--tint-1), var(--tint-2));
+  --mat-bg-blend: normal;
+  --mat-blur: 18px;
+  --mat-saturate: 150%;
+  --mat-border: 1px solid var(--line);
+  --mat-shadow: inset 0 1px 1px var(--spec-hi-dim), 0 14px 44px var(--drop-1);
+  --mat-radius: var(--radius-md);
+  --mat-before-bg: none;
+  --mat-before-blend: normal;
+  --mat-before-opacity: 0;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: var(--noise-a);
+}
+
+/* ============================================================================
+   容器：唯一的一份实现
+   ============================================================================ */
+.surface {
+  position: relative;
+  isolation: isolate;               /* 把 mix-blend-mode 关在容器内部，不外溢 */
+  background: var(--mat-bg);
+  background-blend-mode: var(--mat-bg-blend, normal);
+  border: var(--mat-border);
+  border-radius: var(--mat-radius);
+  box-shadow: var(--mat-shadow);
+}
+
+/* 模糊单独拆出来：只有大容器（侧栏/顶栏/弹窗）才加，
+   守住"同时存在的 backdrop-filter 元素 ≤ 3"这条性能红线。
+   小卡片用材质渐变即可，模糊代价高且看不出来。 */
+.surface--blur {
+  backdrop-filter: blur(var(--mat-blur)) saturate(var(--mat-saturate));
+  -webkit-backdrop-filter: blur(var(--mat-blur)) saturate(var(--mat-saturate));
+}
+
+/* 材质装饰层：高光 / 噪点 / 虹彩 / 条纹
+   z-index:-1 让它们落在容器背景之上、真实内容之下 ——
+   这保证文字永远不被材质透明度污染（规格的硬要求）。 */
+.surface::before,
+.surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.surface::before {
+  background: var(--mat-before-bg, none);
+  mix-blend-mode: var(--mat-before-blend, normal);
+  opacity: var(--mat-before-opacity, 0);
+}
+
+.surface::after {
+  background: var(--mat-after-bg, none);
+  opacity: var(--mat-after-opacity, 0);
+}
+
+/* ============================================================================
+   10 套材质
+   ============================================================================ */
+
+/* --- 1. 液态玻璃 Liquid Glass ---------------------------------------------- */
+[data-material="liquid-glass"] {
+  --mat-bg: linear-gradient(135deg, var(--tint-1), var(--tint-2));
+  --mat-blur: 26px;
+  --mat-saturate: 180%;
+  --mat-border: 1px solid var(--line);
+  --mat-radius: 22px;
+  --mat-shadow:
+    inset 0 1px 1px var(--spec-hi),
+    inset 0 -1px 1px var(--shade),
+    0 20px 60px var(--drop-1);
+  --mat-before-bg: radial-gradient(120% 90% at 50% -20%,
+                   var(--spec-hi-dim), transparent 62%);
+  --mat-before-blend: screen;
+  --mat-before-opacity: .85;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: var(--noise-a);
+}
+
+/* --- 2. 玻璃拟态 Glassmorphism（轻量版） ----------------------------------- */
+[data-material="glassmorphism"] {
+  --mat-bg: linear-gradient(135deg, var(--tint-2), transparent);
+  --mat-blur: 14px;
+  --mat-saturate: 140%;
+  --mat-border: 1px solid var(--line);
+  --mat-radius: 16px;
+  --mat-shadow: 0 8px 32px var(--drop-2);
+  --mat-before-bg: none;
+  --mat-before-opacity: 0;
+  --mat-after-bg: none;
+  --mat-after-opacity: 0;
+}
+
+/* --- 3. 亚克力 Acrylic ----------------------------------------------------- */
+[data-material="acrylic"] {
+  --mat-bg: var(--tint-flat);
+  --mat-blur: 18px;
+  --mat-saturate: 130%;
+  --mat-border: 1px solid transparent;      /* 边框几乎不可见 */
+  --mat-radius: 12px;
+  --mat-shadow: 0 10px 34px var(--drop-2);
+  --mat-before-bg: none;
+  --mat-before-opacity: 0;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: calc(var(--noise-a) * 1.8);   /* 噪点更明显，整体更"哑" */
+}
+
+/* --- 4. 云母 Mica ---------------------------------------------------------- */
+[data-material="mica"] {
+  --mat-bg: var(--tint-flat);
+  --mat-blur: 6px;                          /* 几乎不模糊 */
+  --mat-saturate: 110%;
+  --mat-border: 1px solid var(--border-soft);
+  --mat-radius: 10px;
+  --mat-shadow: 0 24px 70px var(--drop-1);  /* 大面积柔和阴影 */
+  --mat-before-bg: none;
+  --mat-before-opacity: 0;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: var(--noise-a);
+}
+
+/* --- 5. 新拟物 Neumorphism ------------------------------------------------- */
+[data-material="neumorphism"] {
+  --mat-bg: var(--neu-base);
+  --mat-blur: 0px;
+  --mat-saturate: 100%;
+  --mat-border: 1px solid transparent;
+  --mat-radius: 18px;
+  /* 一对方向相反的双阴影塑造浮雕感，无模糊、无边框。
+     注意：新拟物只有在「背景与卡片同色系」时才最出效果（这是材质本身的性质）；
+     放在高对比彩色壁纸上会显得偏平 —— 详见 docs/UI_STANDARD.md 的适配建议。 */
+  --mat-shadow:
+    -8px -8px 18px var(--neu-hi),
+     8px  8px 20px var(--neu-lo);
+  --mat-before-bg: none;
+  --mat-before-opacity: 0;
+  --mat-after-bg: none;
+  --mat-after-opacity: 0;
+}
+
+/* --- 6. 粘土拟态 Claymorphism ---------------------------------------------- */
+[data-material="claymorphism"] {
+  --mat-bg: var(--neu-base);
+  --mat-blur: 0px;
+  --mat-saturate: 100%;
+  --mat-border: 1px solid transparent;
+  --mat-radius: 28px;                        /* 大圆角 */
+  --mat-shadow:
+    inset 0 -8px 16px var(--shade),          /* 厚实内阴影 */
+    inset 0  5px 10px var(--spec-hi-dim),    /* 顶部内高光 */
+    0 20px 44px var(--drop-2);               /* 外侧柔和大阴影 */
+  --mat-before-bg: radial-gradient(80% 50% at 50% 0%,
+                   var(--spec-hi-dim), transparent 70%);
+  --mat-before-blend: screen;
+  --mat-before-opacity: .55;
+  --mat-after-bg: none;
+  --mat-after-opacity: 0;
+}
+
+/* --- 7. 全息虹彩 Holographic ----------------------------------------------- */
+[data-material="holographic"] {
+  --mat-bg: linear-gradient(135deg, var(--tint-1), var(--tint-2));
+  --mat-blur: 20px;
+  --mat-saturate: 170%;
+  --mat-border: 1px solid var(--line);
+  --mat-radius: 20px;
+  --mat-shadow:
+    inset 0 1px 1px var(--spec-hi-dim),
+    0 18px 50px var(--drop-1);
+  /* 彩虹靠 conic-gradient 伪造镭射膜，强度由 --rainbow-a 统一控制 */
+  --mat-before-bg: conic-gradient(from 210deg at 50% 50%,
+    rgba(255, 120, 200, var(--rainbow-a))   0deg,
+    rgba(120, 220, 255, var(--rainbow-a))  70deg,
+    rgba(150, 255, 190, var(--rainbow-a)) 140deg,
+    rgba(255, 235, 140, var(--rainbow-a)) 210deg,
+    rgba(200, 140, 255, var(--rainbow-a)) 290deg,
+    rgba(255, 120, 200, var(--rainbow-a)) 360deg);
+  --mat-before-blend: overlay;
+  --mat-before-opacity: 1;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: var(--noise-a);
+}
+
+/* --- 8. 液态金属 Liquid Metal ---------------------------------------------- */
+[data-material="liquid-metal"] {
+  /* 多层线性渐变模拟金属反射条纹，边界锐利、不用模糊 */
+  --mat-bg: linear-gradient(105deg,
+    var(--metal-3)  0%,
+    var(--metal-1) 18%,
+    var(--metal-2) 32%,
+    var(--metal-1) 46%,
+    var(--metal-3) 60%,
+    var(--metal-1) 78%,
+    var(--metal-2) 90%,
+    var(--metal-3) 100%);
+  --mat-blur: 0px;
+  --mat-saturate: 120%;
+  --mat-border: 1px solid var(--spec-hi-dim);
+  --mat-radius: 14px;
+  --mat-shadow:
+    inset 0 1px 0 var(--spec-hi),
+    0 14px 34px var(--drop-1);
+  --mat-before-bg: conic-gradient(from 200deg at 30% 0%,
+    transparent 0deg, var(--spec-hi-dim) 40deg, transparent 90deg,
+    transparent 200deg, var(--spec-hi-dim) 250deg, transparent 300deg);
+  --mat-before-blend: screen;
+  --mat-before-opacity: .5;
+  --mat-after-bg: none;
+  --mat-after-opacity: 0;
+}
+
+/* --- 9. 磨砂金属 Brushed Metal --------------------------------------------- */
+[data-material="brushed-metal"] {
+  /* 单向细密条纹 + 中性灰金属渐变 */
+  --mat-bg: linear-gradient(180deg, var(--metal-1), var(--metal-3));
+  --mat-bg-blend: normal;
+  --mat-blur: 0px;
+  --mat-saturate: 100%;
+  --mat-border: 1px solid var(--line);
+  --mat-radius: 12px;
+  --mat-shadow:
+    inset 0 1px 0 var(--spec-hi-dim),
+    0 12px 30px var(--drop-2);
+  --mat-before-bg: var(--brush-img);         /* 拉丝条纹 */
+  --mat-before-blend: overlay;
+  --mat-before-opacity: .9;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: calc(var(--noise-a) * 1.4);
+}
+
+/* --- 10. 极光玻璃 Aurora Glass --------------------------------------------- */
+[data-material="aurora-glass"] {
+  --mat-bg: linear-gradient(135deg, var(--tint-1), var(--tint-2));
+  --mat-blur: 22px;
+  --mat-saturate: 160%;
+  --mat-border: 1px solid var(--line);
+  --mat-radius: 20px;
+  --mat-shadow:
+    inset 0 1px 1px var(--spec-hi-dim),
+    0 20px 56px var(--drop-1);
+  /* 极光光晕：径向渐变伪造，不读背景内容 */
+  --mat-before-bg:
+    radial-gradient(70% 90% at 12%  8%, var(--glow-1), transparent 62%),
+    radial-gradient(80% 80% at 88% 92%, var(--glow-2), transparent 60%);
+  --mat-before-blend: screen;
+  --mat-before-opacity: .9;
+  --mat-after-bg: var(--noise-img);
+  --mat-after-opacity: var(--noise-a);
+}
+
+/* ============================================================================
+   极轻微的呼吸感（仅液体系，9s 一个来回，只动 opacity）
+   刻意不做鼠标跟随、不做流动动画。
+   ============================================================================ */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes sp-breathe {
+    0%, 100% { opacity: var(--mat-before-opacity, 0); }
+    50%      { opacity: calc(var(--mat-before-opacity, 0) * .72); }
+  }
+  [data-material="liquid-glass"] .surface::before,
+  [data-material="aurora-glass"] .surface--blur::before {
+    animation: sp-breathe 9s ease-in-out infinite;
+  }
+}
+
+/* ============================================================================
+   可访问性降级
+   ============================================================================ */
+/* 系统要求减少透明 → 全部退回不透明纯色，并关掉模糊 */
+@media (prefers-reduced-transparency: reduce) {
+  .surface {
+    background: var(--solid);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--border);
+  }
+  .surface::before,
+  .surface::after {
+    display: none;
+  }
+}
+
+/* 用户主动要求关闭材质装饰（可手动挂 data-flat="1"） */
+[data-flat="1"] .surface {
+  background: var(--solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-flat="1"] .surface::before,
+[data-flat="1"] .surface::after {
+  display: none;
+}

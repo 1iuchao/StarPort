@@ -21,6 +21,36 @@ const STATUS_TEXT = {
   crashed: '已崩溃', error: '启动失败',
 };
 
+/* 10 套页面材质。切换 = 改变量，预览色块靠 CSS 变量继承"活体"渲染。 */
+const MATERIALS = [
+  { id: 'liquid-glass', name: '液态玻璃', en: 'Liquid Glass' },
+  { id: 'glassmorphism', name: '玻璃拟态', en: 'Glassmorphism' },
+  { id: 'acrylic', name: '亚克力', en: 'Acrylic' },
+  { id: 'mica', name: '云母', en: 'Mica' },
+  { id: 'neumorphism', name: '新拟物', en: 'Neumorphism' },
+  { id: 'claymorphism', name: '粘土拟态', en: 'Claymorphism' },
+  { id: 'holographic', name: '全息虹彩', en: 'Holographic' },
+  { id: 'liquid-metal', name: '液态金属', en: 'Liquid Metal' },
+  { id: 'brushed-metal', name: '磨砂金属', en: 'Brushed Metal' },
+  { id: 'aurora-glass', name: '极光玻璃', en: 'Aurora Glass' },
+];
+
+/* 背景预设（第 0 层）。'theme' 表示跟随当前基调的内置背景。 */
+const BG_PRESETS = [
+  { id: 'theme', name: '跟随主题', css: '' },
+  { id: 'deep-sea', name: '深海',
+    css: 'radial-gradient(1100px 760px at 12% -8%, #123047 0%, transparent 62%),' +
+         'radial-gradient(900px 700px at 98% 100%, #0d2438 0%, transparent 58%), #070d14' },
+  { id: 'nebula', name: '星云',
+    css: 'radial-gradient(1000px 700px at 20% 0%, #3a1f52 0%, transparent 60%),' +
+         'radial-gradient(900px 700px at 95% 95%, #1d2a55 0%, transparent 58%), #0a0a12' },
+  { id: 'warm-sand', name: '暖砂',
+    css: 'radial-gradient(1100px 760px at 15% -5%, #5a4632 0%, transparent 62%),' +
+         'radial-gradient(900px 700px at 100% 100%, #40332a 0%, transparent 58%), #171310' },
+];
+
+const BG_DEFAULT = { type: 'preset', value: 'theme' };
+
 /* ────────────────────────────── 网络 ────────────────────────────── */
 async function api(path, options) {
   const res = await fetch(path, Object.assign({ headers: {} }, options || {}));
@@ -210,8 +240,9 @@ async function openApp(id) {
       { actions: [{ label: '停止', cls: 'danger-btn', onClick: () => stopCurrent() }] });
     return;
   }
-  $('#frame').src = r.url;
-  $('#btn-popout').onclick = () => window.open(r.url, '_blank');
+  const themed = withThemeParams(r.url);
+  $('#frame').src = themed;
+  $('#btn-popout').onclick = () => window.open(themed, '_blank');
   // 兜底：某些应用不触发 load 事件时，别让"正在启动"一直卡着
   setTimeout(() => {
     if (!$('#overlay').classList.contains('hidden') &&
@@ -320,6 +351,8 @@ function fillSettings() {
 
   renderSysInfo();
   renderAppAdmin();
+  renderMaterialGrid();
+  renderBgPresets();
 }
 
 function renderSysInfo() {
@@ -411,8 +444,184 @@ async function saveSettings() {
 }
 
 function applyTheme() {
-  document.documentElement.dataset.theme =
-    (S.settings.platform && S.settings.platform.theme) || 'dark';
+  const p = S.settings.platform || {};
+  const root = document.documentElement;
+  root.dataset.theme = p.theme || 'dark';
+  const mat = p.material || 'liquid-glass';
+  root.dataset.material = MATERIALS.some(m => m.id === mat) ? mat : 'liquid-glass';
+  applyBackground(p.background || BG_DEFAULT);
+  pushThemeToApp();
+}
+
+/* 把当前主题推给已打开的应用（跨域 iframe 允许 postMessage）。
+   应用侧的接收方式见 docs/UI_STANDARD.md —— 这是"平台与第三方应用视觉一致"的通道。 */
+function currentTokens() {
+  const p = S.settings.platform || {};
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const pick = (n) => (cs.getPropertyValue(n) || '').trim();
+    return {
+      '--sp-bg': pick('--bg'),
+      '--sp-surface': pick('--solid'),
+      '--sp-text': pick('--text'),
+      '--sp-text-dim': pick('--text-dim'),
+      '--sp-text-faint': pick('--text-faint'),
+      '--sp-accent': pick('--accent'),
+      '--sp-border': pick('--border'),
+      '--sp-panel': pick('--panel'),
+      '--sp-radius': pick('--radius-md'),
+      '--sp-font': pick('--font'),
+      '--sp-material-radius': pick('--mat-radius'),
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+function pushThemeToApp() {
+  const f = $('#frame');
+  if (!f || !f.src || !/^https?:/i.test(f.src)) return;
+  try {
+    const p = S.settings.platform || {};
+    f.contentWindow.postMessage({
+      type: 'starport:theme',
+      version: 1,
+      theme: p.theme || 'dark',
+      material: p.material || 'liquid-glass',
+      tokens: currentTokens(),
+    }, '*');
+  } catch (_) {
+    /* 应用没监听也无所谓，不影响平台 */
+  }
+}
+
+/* 打开应用时把主题写进 URL —— 应用可以在首屏渲染前就读到，
+   避免"先按默认色渲染再闪一下"的割裂感。 */
+function withThemeParams(rawUrl) {
+  if (!rawUrl || !/^https?:/i.test(rawUrl)) return rawUrl;   // static 型是站内路径
+  try {
+    const u = new URL(rawUrl);
+    const p = S.settings.platform || {};
+    u.searchParams.set('sp-theme', p.theme || 'dark');
+    u.searchParams.set('sp-material', p.material || 'liquid-glass');
+    u.searchParams.set('sp-source', 'starport');
+    return u.toString();
+  } catch (_) {
+    return rawUrl;
+  }
+}
+
+/* ──────────────────────  第 0 层：背景（独立接口）  ──────────────────────
+   背景与材质完全解耦。材质只靠 backdrop-filter 感知"背后有什么"，
+   从不读取背景内容，所以换背景图 / 换背景视频时，材质层零改动、零错位。 */
+function applyBackground(spec) {
+  const el = $('#stage-bg');
+  if (!el) return;
+  const bg = spec || BG_DEFAULT;
+  el.innerHTML = '';
+  el.style.background = '';
+
+  if (bg.type === 'file' && bg.url) {
+    if (bg.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = bg.url;
+      v.autoplay = true; v.muted = true; v.loop = true; v.playsInline = true;
+      el.appendChild(v);
+    } else {
+      const img = document.createElement('img');
+      img.src = bg.url;
+      img.alt = '';
+      el.appendChild(img);
+    }
+    return;
+  }
+
+  if (bg.type === 'preset' && bg.value && bg.value !== 'theme') {
+    const preset = BG_PRESETS.find(p => p.id === bg.value);
+    if (preset && preset.css) el.style.background = preset.css;
+  }
+  /* 其余情况留空 → 由 CSS 的 var(--stage-bg) 按当前基调渲染 */
+}
+
+/* 对外接口：setBackground({type:'preset'|'file', ...})
+   调用后材质层与内容层完全不受影响。 */
+function setBackground(spec) {
+  applyBackground(spec);
+  S.settings.platform = S.settings.platform || {};
+  S.settings.platform.background = spec;
+  quickSave();
+  renderBgPresets();
+}
+
+function renderBgPresets() {
+  const box = $('#bg-presets');
+  if (!box) return;
+  const cur = (S.settings.platform && S.settings.platform.background) || BG_DEFAULT;
+  box.innerHTML = '';
+
+  BG_PRESETS.forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bg-item' + (cur.type === 'preset' && cur.value === p.id ? ' active' : '');
+    b.title = p.name;
+    b.style.background = p.css || 'var(--stage-bg)';
+    b.onclick = () => setBackground({ type: 'preset', value: p.id });
+    box.appendChild(b);
+  });
+
+  if (cur.type === 'file' && cur.url) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bg-item active';
+    b.title = '当前自定义背景';
+    if (cur.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = cur.url; v.muted = true; v.autoplay = true; v.loop = true;
+      b.appendChild(v);
+    } else {
+      const i = document.createElement('img');
+      i.src = cur.url; i.alt = '';
+      b.appendChild(i);
+    }
+    b.onclick = () => setBackground(cur);
+    box.appendChild(b);
+  }
+}
+
+function renderMaterialGrid() {
+  const box = $('#material-grid');
+  if (!box) return;
+  const cur = (S.settings.platform && S.settings.platform.material) || 'liquid-glass';
+  box.innerHTML = '';
+  MATERIALS.forEach(m => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'material-item' + (m.id === cur ? ' active' : '');
+    /* 色块自己挂 data-material，直接继承那套材质的变量 —— 等于活体预览，
+       加第 11 套材质时这里不需要改一行代码。 */
+    b.innerHTML =
+      '<div class="material-swatch" data-material="' + m.id + '"></div>' +
+      '<div class="material-name">' + m.name + '</div>' +
+      '<div class="material-en">' + m.en + '</div>';
+    b.onclick = () => {
+      S.settings.platform = S.settings.platform || {};
+      S.settings.platform.material = m.id;
+      applyTheme();                 // 即时生效，不等"保存并应用"
+      quickSave();
+      renderMaterialGrid();
+    };
+    box.appendChild(b);
+  });
+}
+
+/* 视觉类设置的即时落盘（材质/背景/基调），不走底部的保存按钮 */
+async function quickSave() {
+  if (window.__SP_PREVIEW__) return;     // URL 预览模式下不污染真实配置
+  try {
+    await post('/api/settings', { patch: { platform: S.settings.platform || {} } });
+  } catch (_) {
+    /* 保存失败不影响当前会话的视觉，静默即可 */
+  }
 }
 
 /* ────────────────────────────── 配置导入导出 ────────────────────────────── */
@@ -466,6 +675,18 @@ async function boot(autoLaunch = true) {
   S.apps = r.apps || [];
   S.settings = r.settings || { platform: {} };
   S.state = r.state || S.state;
+
+  /* URL 参数预览：?sp-theme=light&sp-material=acrylic
+     仅供预览与自动化截图使用，不回写配置。
+     这套参数名同时也是平台向应用传递主题的约定（见 docs/UI_STANDARD.md），
+     平台与壳用同一套命名，避免两套标准。 */
+  const qs = new URLSearchParams(location.search);
+  const qTheme = qs.get('sp-theme');
+  const qMat = qs.get('sp-material');
+  if (qTheme) S.settings.platform.theme = qTheme;
+  if (qMat) S.settings.platform.material = qMat;
+  window.__SP_PREVIEW__ = !!(qTheme || qMat);
+
   applyTheme();
   const sys = await api('/api/system');
   if (sys.ok) S.sys = sys.system || {};
@@ -507,8 +728,35 @@ function bind() {
   $('#btn-install').onclick = doInstall;
   $('#btn-reload').onclick = async () => { await reloadApps(); renderNav(); renderAppAdmin(); };
 
+  /* ---- 背景：本地文件 → 交给平台托管（前端不直接读本地路径） ---- */
+  $('#btn-bg-file').onclick = () => $('#bg-file').click();
+  $('#btn-bg-reset').onclick = () => setBackground(BG_DEFAULT);
+  $('#bg-file').onchange = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 40 * 1024 * 1024) { alert('文件超过 40MB 上限'); return; }
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let bin = '';
+      const CH = 0x8000;                       // 分块避免参数过多爆栈
+      for (let i = 0; i < bytes.length; i += CH) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      }
+      const r = await post('/api/background/upload',
+                           { filename: f.name, data: btoa(bin) });
+      if (!r.ok) { alert('背景设置失败：' + (r.error || '')); return; }
+      setBackground({
+        type: 'file', url: r.url, file: r.file,
+        kind: /\.(mp4|webm|mov|m4v)$/i.test(f.name) ? 'video' : 'image',
+      });
+    } catch (err) {
+      alert('背景设置失败：' + err.message);
+    }
+  };
+
   $('#frame').addEventListener('load', () => {
-    if ($('#frame').src) hideOverlay();
+    if ($('#frame').src) { hideOverlay(); pushThemeToApp(); }
   });
 
   window.addEventListener('beforeunload', () => {

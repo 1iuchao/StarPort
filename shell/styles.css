@@ -1,44 +1,6 @@
-/* StarPort 壳样式 —— 零构建，原生 CSS 变量驱动主题 */
-
-:root {
-  --bg: #0e1116;
-  --bg-2: #131820;
-  --panel: #171d27;
-  --panel-2: #1d2430;
-  --border: #262e3b;
-  --border-soft: #1f2732;
-  --text: #e6ebf2;
-  --text-dim: #8b97a8;
-  --text-faint: #5f6b7d;
-  --accent: #6ea8fe;
-  --accent-soft: rgba(110, 168, 254, .14);
-  --ok: #4ec9a0;
-  --warn: #e3b341;
-  --danger: #f2777a;
-  --radius: 10px;
-  --radius-sm: 7px;
-  --sidebar-w: 268px;
-  --font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
-          -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "Cascadia Mono", "Consolas", "JetBrains Mono", monospace;
-}
-
-[data-theme="light"] {
-  --bg: #f4f6fa;
-  --bg-2: #eaeef5;
-  --panel: #ffffff;
-  --panel-2: #f2f5fa;
-  --border: #dde3ec;
-  --border-soft: #e7ecf3;
-  --text: #17202c;
-  --text-dim: #5b6779;
-  --text-faint: #8a95a6;
-  --accent: #2f6fdb;
-  --accent-soft: rgba(47, 111, 219, .10);
-  --ok: #1f9d6f;
-  --warn: #b8860b;
-  --danger: #d1495b;
-}
+/* StarPort 壳样式 —— 布局与组件装配。
+   设计 token 见 tokens.css；材质实现见 materials.css。
+   本文件只消费变量，不硬编码颜色与模糊数值。 */
 
 * { box-sizing: border-box; }
 
@@ -55,19 +17,45 @@ html, body {
 button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
 a { color: var(--accent); }
 
+/* ───────────────────────  第 0 层：背景（可运行时替换）  ───────────────────────
+   .stage-bg 是独立的一层，铺满窗口、位于所有内容之下。
+   它只负责"画背景"这件事 —— 可以是渐变、图片或视频。
+   材质层（第 1 层）不读取它的内容，只靠 backdrop-filter 感知它，
+   所以换背景不需要动任何材质代码。 */
+.stage-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--stage-bg);
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+.stage-bg > img,
+.stage-bg > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .app {
+  position: relative;
+  z-index: 1;                    /* 内容整体浮在背景层之上 */
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   height: 100%;
+  gap: 10px;
+  padding: 10px;
 }
 
 /* ─────────────────────────────  侧栏  ───────────────────────────── */
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
-  border-right: 1px solid var(--border);
+  border-right: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .brand {
@@ -123,7 +111,7 @@ a { color: var(--accent); }
   letter-spacing: .6px;
   text-transform: uppercase;
 }
-.nav-group-title .count { color: var(--text-faint); opacity: .7; }
+.nav-group-title .count { color: var(--text-faint); }
 
 .app-item {
   display: flex; align-items: center; gap: 9px;
@@ -139,7 +127,11 @@ a { color: var(--accent); }
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
-.app-item.dim { opacity: .45; }
+/* 禁用状态：文字保持实色，只降色阶；淡化只作用于图标。
+   规格要求"内容层文字始终清晰、不随透明度变化"，所以不给整项套 opacity。 */
+.app-item.dim { color: var(--text-faint); }
+.app-item.dim .app-name { color: var(--text-faint); }
+.app-item.dim .app-icon { opacity: .5; }
 
 .app-icon {
   width: 26px; height: 26px; flex: 0 0 26px;
@@ -206,14 +198,14 @@ a { color: var(--accent); }
 .platform-stat { font-size: 10.5px; color: var(--text-faint); padding-right: 4px; }
 
 /* ─────────────────────────────  主区  ───────────────────────────── */
-.main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+/* .main 本身保持透明：它只是排版容器，背景由第 0 层负责透出 */
+.main { display: flex; flex-direction: column; min-width: 0; gap: 10px; }
 
 .topbar {
-  height: 52px; flex: 0 0 52px;
+  height: var(--topbar-h); flex: 0 0 var(--topbar-h);
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  padding: 0 16px;
+  min-width: 0;
 }
 .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cur-icon {
@@ -249,19 +241,20 @@ a { color: var(--accent); }
 .danger-btn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .danger-btn:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
-.stage { position: relative; flex: 1; min-height: 0; }
-.frame { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.frame { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
 .frame.hidden { visibility: hidden; }
 
 .overlay {
   position: absolute; inset: 0;
   display: grid; place-items: center;
-  background: var(--bg);
+  background: var(--solid);
+  border-radius: inherit;
   z-index: 5;
 }
 .overlay.hidden { display: none; }
 .overlay-card { text-align: center; max-width: 620px; padding: 24px; }
-.overlay-glyph { font-size: 40px; margin-bottom: 8px; opacity: .85; }
+.overlay-glyph { font-size: 40px; margin-bottom: 8px; }
 .overlay-card h2 { margin: 0 0 6px; font-size: 17px; font-weight: 650; }
 .overlay-card p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
 .ov-log {
@@ -284,11 +277,8 @@ a { color: var(--accent); }
   width: min(720px, 92vw);
   max-height: 86vh;
   display: flex; flex-direction: column;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0,0,0,.45);
   overflow: hidden;
+  /* 背景 / 边框 / 圆角 / 阴影由 .surface 材质层提供，此处不写死 */
 }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -367,3 +357,50 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 
 /* 空态 */
 .empty { padding: 14px; text-align: center; color: var(--text-faint); font-size: 12.5px; }
+
+/* ─────────────────────────  材质选择器  ─────────────────────────
+   预览色块利用了 CSS 变量的继承特性：色块自己挂一个 data-material，
+   就能拿到那套材质的 --mat-bg / --mat-border，等于"活体预览"。 */
+.material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+.material-item {
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.material-item:hover { border-color: var(--accent); }
+.material-item.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.material-swatch {
+  height: 26px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: var(--mat-bg, var(--panel-2));
+  border: var(--mat-border, 1px solid var(--border));
+  background-blend-mode: var(--mat-bg-blend, normal);
+}
+.material-name { font-size: 12px; font-weight: 600; }
+.material-en { font-size: 10px; color: var(--text-faint); margin-top: 1px; }
+
+/* ─────────────────────────  背景预设  ───────────────────────── */
+.bg-presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.bg-item {
+  width: 70px; height: 46px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+}
+.bg-item img, .bg-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bg-item.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }

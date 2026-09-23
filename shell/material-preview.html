@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!--
+  材质预览页 —— 开发/验收用，不是平台功能的一部分。
+  打开方式：http://127.0.0.1:19000/shell/material-preview.html?theme=dark|light
+  作用：一屏对比 10 套材质在指定基调下的实际渲染，用于调整 token 参数。
+  它直接引用 tokens.css / materials.css，所以展示的就是平台正在用的那套变量。
+-->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>材质总览</title>
+<link rel="stylesheet" href="/shell/tokens.css">
+<link rel="stylesheet" href="/shell/materials.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 13px/1.5 "Microsoft YaHei UI", sans-serif;
+    color: var(--text);
+    padding: 22px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* 高对比"壁纸"，用来检验毛玻璃是否真的在起作用 */
+  .wall {
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(58% 78% at 8% 12%,  #ff5f9e 0%, transparent 62%),
+      radial-gradient(58% 78% at 88% 16%, #22d3ee 0%, transparent 62%),
+      radial-gradient(70% 70% at 46% 98%, #fbbf24 0%, transparent 60%),
+      radial-gradient(52% 62% at 84% 84%, #7c5cff 0%, transparent 62%),
+      linear-gradient(140deg, #0b1020, #1b1035 55%, #06121f);
+  }
+  .wall::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: repeating-linear-gradient(
+      45deg, rgba(255,255,255,.16) 0 2px, transparent 2px 22px);
+  }
+  .wrap { position: relative; z-index: 1; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { font-size: 12px; opacity: .82; margin-bottom: 16px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+  }
+  .cell { min-width: 0; }
+  .surface {
+    height: 128px;
+    padding: 12px;
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .nm { font-weight: 700; font-size: 13px; color: var(--text); }
+  .en { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; }
+  .tag { font-size: 10px; color: var(--text-faint); margin-top: 5px; }
+</style>
+</head>
+<body>
+<div class="wall"></div>
+<div class="wrap">
+  <h1>StarPort 页面材质 · 总览</h1>
+  <div class="sub" id="sub">暗色基调 · 10 套</div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+const MATERIALS = [
+  ['liquid-glass', '液态玻璃', 'Liquid Glass', 'blur 26 · sat 180%'],
+  ['glassmorphism', '玻璃拟态', 'Glassmorphism', 'blur 14 · 轻量'],
+  ['acrylic', '亚克力', 'Acrylic', 'blur 18 · 强噪点'],
+  ['mica', '云母', 'Mica', 'blur 6 · 大面积阴影'],
+  ['neumorphism', '新拟物', 'Neumorphism', '双阴影 · 无模糊'],
+  ['claymorphism', '粘土拟态', 'Claymorphism', '厚内阴影 · 大圆角'],
+  ['holographic', '全息虹彩', 'Holographic', 'conic 彩虹 · overlay'],
+  ['liquid-metal', '液态金属', 'Liquid Metal', '多层渐变 · 锐利'],
+  ['brushed-metal', '磨砂金属', 'Brushed Metal', '拉丝条纹'],
+  ['aurora-glass', '极光玻璃', 'Aurora Glass', '径向光晕 · screen'],
+];
+
+const qs = new URLSearchParams(location.search);
+const theme = qs.get('theme') || 'dark';
+document.documentElement.dataset.theme = theme;
+document.getElementById('sub').textContent =
+  (theme === 'dark' ? '暗色基调' : '亮色基调') + ' · 10 套';
+
+const grid = document.getElementById('grid');
+MATERIALS.forEach(([id, name, en, tag]) => {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.dataset.material = id;                 // 变量从这里继承给 .surface
+  cell.innerHTML =
+    '<div class="surface surface--blur">' +
+      '<div class="nm">' + name + '</div>' +
+      '<div class="en">' + en + '</div>' +
+      '<div class="tag">' + tag + '</div>' +
+    '</div>';
+  grid.appendChild(cell);
+});
+</script>
+</body>
+</html>

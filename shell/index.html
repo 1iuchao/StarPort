@@ -1,18 +1,24 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="dark" data-material="liquid-glass">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StarPort · 星港</title>
+<!-- 顺序有讲究：token → 材质 → 壳装配。后者覆盖前者的变量消费 -->
+<link rel="stylesheet" href="/shell/tokens.css">
+<link rel="stylesheet" href="/shell/materials.css">
 <link rel="stylesheet" href="/shell/styles.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='%236ea8fe'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%236ea8fe' stroke-opacity='.45' stroke-width='2'/%3E%3C/svg%3E">
 </head>
 <body>
 
+<!-- 第 0 层：背景。可运行时替换为图片 / 视频，材质层不感知其内容 -->
+<div class="stage-bg" id="stage-bg" aria-hidden="true"></div>
+
 <div class="app">
 
   <!-- ──────────────────────────────  侧栏  ────────────────────────────── -->
-  <aside class="sidebar">
+  <aside class="sidebar surface surface--blur">
     <div class="brand">
       <div class="brand-mark">星</div>
       <div class="brand-text">
@@ -41,7 +47,7 @@
 
   <!-- ──────────────────────────────  主区  ────────────────────────────── -->
   <main class="main">
-    <header class="topbar">
+    <header class="topbar surface surface--blur">
       <div class="topbar-left">
         <span id="cur-icon" class="cur-icon">星</span>
         <div>
@@ -57,7 +63,7 @@
       </div>
     </header>
 
-    <section class="stage">
+    <section class="stage surface">
       <div id="overlay" class="overlay">
         <div class="overlay-card">
           <div class="overlay-glyph">🛰</div>
@@ -76,7 +82,7 @@
 <!-- ──────────────────────────────  设置面板  ────────────────────────────── -->
 <div id="settings" class="modal" hidden>
   <div class="modal-backdrop" data-close="1"></div>
-  <div class="modal-panel">
+  <div class="modal-panel surface surface--blur">
     <div class="modal-head">
       <h2>设置</h2>
       <button class="icon-btn" data-close="1" type="button" aria-label="关闭">✕</button>
@@ -93,11 +99,32 @@
       <!-- 通用 -->
       <div class="tabpage active" data-page="general">
         <div class="row">
-          <label for="s-theme">主题</label>
+          <label for="s-theme">基调</label>
           <select id="s-theme">
             <option value="dark">深色</option>
             <option value="light">浅色</option>
           </select>
+          <p class="hint">10 套材质 × 亮/暗两套基调 = 20 种组合，均为变量驱动</p>
+        </div>
+
+        <div class="row">
+          <label>页面材质</label>
+          <div class="material-grid" id="material-grid"></div>
+          <p class="hint">
+            全部靠 CSS 渐变 / 阴影 / 混合模式伪造，<b>无</b> Canvas、Shader 或系统透明 API。
+            材质层与背景层解耦，换背景不影响材质。
+          </p>
+        </div>
+
+        <div class="row">
+          <label>页面背景（第 0 层）</label>
+          <div class="bg-presets" id="bg-presets"></div>
+          <div class="btn-row">
+            <button class="ghost" id="btn-bg-file" type="button">选择本地图片 / 视频</button>
+            <button class="ghost" id="btn-bg-reset" type="button">恢复默认</button>
+          </div>
+          <input id="bg-file" type="file" accept="image/*,video/*" hidden>
+          <p class="hint">背景可随时替换，材质层与内容层完全不参与背景计算</p>
         </div>
         <div class="row">
           <label for="s-window">窗口模式</label>
