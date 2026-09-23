@@ -4,6 +4,10 @@
 收进同一个壳里，统一注册、启动、切换、禁用、卸载。
 全部数据落在本地，不联网、离线可用、配置可导入导出。
 
+仓库地址：https://github.com/1iuchao/StarPort
+
+**启动方式**：双击根目录的 `启动 StarPort.bat`（需 Python 3.10+，会自动探测解释器）。
+
 当前版本已接入 2 个示例应用：**FileCleanup**（外部 Python 应用）+ **星港便笺**（内置静态模块）。
 
 > 📘 **要把应用接进来？直接看 [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md)。**
