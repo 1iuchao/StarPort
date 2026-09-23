@@ -170,6 +170,14 @@ class Supervisor:
             flags = 0
             if os.name == "nt":
                 flags |= subprocess.CREATE_NEW_PROCESS_GROUP   # 不传染 Ctrl+C
+                # ★ 必须显式禁掉控制台窗口。
+                #   平台自己是用 pythonw 启动的（无控制台），子进程没有可继承的
+                #   控制台时，Windows 会给它**新建一个黑窗口**弹出来 ——
+                #   而应用输出早就重定向到 data/logs/<id>.log 了，
+                #   所以那个窗口是空白的，纯粹是噪音。
+                #   external 型例外：那类程序用户就是要看见它的窗口。
+                if meta.type != TYPE_EXTERNAL:
+                    flags |= subprocess.CREATE_NO_WINDOW
 
             try:
                 proc = subprocess.Popen(
