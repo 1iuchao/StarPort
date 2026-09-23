@@ -6,7 +6,8 @@
 
 仓库地址：https://github.com/1iuchao/StarPort
 
-**启动方式**：双击根目录的 `启动 StarPort.bat`（需 Python 3.10+，会自动探测解释器）。
+**启动方式**：双击根目录的 `启动 StarPort.bat` —— 用 `pythonw` 启动，**没有控制台窗口**
+（需 Python 3.10+，会自动探测）。想实时看日志就用 `启动 StarPort（显示日志）.bat`。
 
 当前版本已接入 2 个示例应用：**FileCleanup**（外部 Python 应用）+ **星港便笺**（内置静态模块）。
 
@@ -58,13 +59,15 @@
 
 ```
 StarPort/
-├── 启动 StarPort.bat        # ★ 双击启动（纯 ASCII bat + Python 引导）
+├── 启动 StarPort.bat        # ★ 双击启动（无控制台窗口）
+├── 启动 StarPort（显示日志）.bat  # 排查问题用：带窗口，实时看日志
 ├── run.py                  # 平台入口（--port / --no-window / --autostarted）
 ├── requirements.txt        # 核心零依赖（pywebview 可选）
 │
 ├── core/                   # 内核：不认识任何具体应用，只认识 manifest 契约
 │   ├── paths.py            # 路径常量与运行时目录
-│   ├── console.py          # 控制台 UTF-8 修复（Windows 中文日志安全）
+│   ├── console.py          # 日志输出：有控制台就修 UTF-8，无控制台就写文件
+│   ├── jobobj.py           # ★ Job Object：平台被杀时连带回收所有应用进程
 │   ├── settings.py         # data/config.json 读写 + 导入导出
 │   ├── state.py            # data/state.json 置顶 / 最近使用 / 上次打开
 │   ├── registry.py         # 扫描 apps/、注册 / 启用 / 禁用 / 卸载 / 安装
@@ -86,12 +89,12 @@ StarPort/
 │
 ├── sdk/starport_sdk.py     # 可选 SDK：端口 / 数据目录 / 就绪播报
 ├── tools/install_app.py    # 命令行安装 / 卸载 / 校验
-├── tools/bootstrap.py      # bat 调用的启动引导（中文输出都在这）
+├── tools/bootstrap.py      # 调试 bat 调用的启动引导（中文输出都在这）
+├── tools/check_isolation.py # 隔离自检：验证孤儿回收真的生效
 ├── docs/
 │   ├── AGENT_GUIDE.md      # ★ 应用接入开发规范（给 agent / 开发者的）
 │   └── ...
 │
-├── 启动 StarPort.bat       # 双击启动
 └── data/                   # 运行时数据（唯一真源，可整个拷走）
     ├── config.json         #   设置 + 应用启用状态
     ├── state.json          #   置顶 / 最近使用
@@ -158,15 +161,38 @@ StarPort/
 
 ---
 
-## 四、隔离与稳定（四层）
+## 四、隔离与稳定（五层）
 
 1. **进程隔离** —— 每个应用一个独立子进程，内核从不 import 应用代码；
 2. **端口隔离** —— 平台统一分配端口并记账，停止即释放，避免抢端口；
 3. **视图隔离** —— 应用界面跑在带 `sandbox` 的 iframe 里，DOM 与 JS 全局互不可见；
 4. **故障隔离** —— 应用崩溃只把那一个 iframe 标记为 crashed，
-   平台本体与其他应用照常运行，可一键重启。
+   平台本体与其他应用照常运行，可一键重启；
+5. **孤儿回收（Job Object）** —— 所有应用进程挂在一个作业对象上，
+   平台一旦消亡（**含被强杀**），OS 立刻连带回收它们。
 
-实测（强杀 FileCleanup 进程后）：
+第 5 层专门解决一个真实痛点：
+
+> 用户不小心关掉启动窗口 → 平台进程被 Windows 强杀 →
+> Python 的 `finally` / `stop_all()` 根本来不及执行 →
+> 应用子进程变成孤儿继续占着端口，界面却没了。
+> 结果就是"平台还在跑却用不了"，还得去任务管理器手动杀。
+
+`Process` 被 `TerminateProcess` 时**没有任何 Python 代码会执行**，
+所以靠 `try/finally` 是保不住这个的。Job Object 设
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 后，句柄一关（进程死＝句柄关）
+OS 立即清场，这是内核级保证。
+
+实测（强杀平台进程，且故意不带 `/T` 以免进程树机制替 Job 干活）：
+
+```
+不挂 Job：应用子进程残留 → 复现孤儿问题
+挂 Job  ：应用子进程被回收，端口 19100 释放 ✓
+```
+
+> 可随时复核：`python tools/check_isolation.py`
+
+实测（强杀 **应用** 进程后，平台与其他应用不受影响）：
 
 ```
 filecleanup → crashed (exit 1)
@@ -175,15 +201,20 @@ notepad     → running      ← 不受影响
 ```
 
 补充保障：每个 HTTP 请求单独 try/except；配置写盘用原子替换（写坏会回滚到默认）；
-`taskkill /T /F` 收进程树，不留孤儿进程。
+停止应用时 `taskkill /T /F` 收进程树。
 
 ---
 
 ## 五、使用
 
-**双击启动（推荐）**：直接双击根目录的 **`启动 StarPort.bat`**。
-它会自动探测本机 Python（优先用平台设置里已选的），校验版本 ≥ 3.10，
-打印中文启动信息并拉起平台。关掉那个黑窗口 = 关闭平台。
+**双击启动（推荐）**：双击根目录的 **`启动 StarPort.bat`**。
+
+它用 `pythonw.exe` 启动，**完全没有控制台窗口** —— 不会出现一个黑窗口
+让人误以为是卡住、顺手关掉。启动后你只会看到平台窗口本身。
+
+- **平台日志**：`data/logs/platform.log`（无窗口模式下日志写这里，不是丢掉）
+- **想实时看日志**：用 **`启动 StarPort（显示日志）.bat`**，会保留一个带输出的窗口
+- **关闭平台**：直接关掉平台窗口即可（会连带回收所有应用进程）
 
 ```bash
 E:/Python312/python.exe run.py                # 启动并开窗口
@@ -248,8 +279,11 @@ E:/Python312/python.exe run.py --port 19500   # 指定端口
 
 - `static` 型应用由平台进程托管静态文件，**隔离弱于** webservice 型（若需要强隔离，
   用 `sdk/starport_sdk.py` 的 `serve_static()` 把它变成 webservice）；
-- 全局快捷键与开机自启目前只支持 Windows（其他平台自动降级，不影响运行）；
-- 关掉窗口默认退出平台（可在设置里关掉，让平台留在后台）；
+- 全局快捷键、开机自启、**Job Object 孤儿回收**目前都只支持 Windows
+  （其他平台自动降级：快捷键/自启失效，孤儿回收退回进程组语义，不影响运行）；
+- 关掉平台窗口默认退出平台（可在设置里关掉，让平台留在后台）；
+- 无窗口模式下若平台启动失败，会弹系统对话框提示 —— 细节仍以
+  `data/logs/platform.log` 为准；
 - 应用之间不提供互相调用的 API —— 这是刻意的，跨应用通信会重新把进程边界打破。
 
 ---

@@ -1,81 +1,69 @@
 @echo off
 rem ============================================================
-rem  StarPort - local app aggregation platform
-rem  Double-click this file to start. Keep this window open.
-rem  NOTE: keep this file pure ASCII. Chinese text here will be
+rem  StarPort - double-click launcher (NO console window)
+rem
+rem  Hands the platform over to pythonw.exe, which has no console
+rem  at all, then exits immediately. So there is no black window
+rem  left for you to accidentally close.
+rem
+rem  Platform logs go to:  data\logs\platform.log
+rem  Want to watch live logs instead?  use the debug launcher
+rem  (the .bat with "shows logs" in its name).
+rem
+rem  NOTE: keep this file PURE ASCII. Chinese text here gets
 rem        garbled because cmd.exe parses the file as ANSI before
-rem        chcp takes effect. All Chinese output comes from
-rem        tools\bootstrap.py instead.
+rem        chcp takes effect.
 rem ============================================================
 
-chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
-title StarPort
-
-set "ROOT=%~dp0"
-set "ENTRY=%ROOT%run.py"
-set "BOOT=%ROOT%tools\bootstrap.py"
+cd /d "%~dp0"
+set "ENTRY=%~dp0run.py"
 
 if not exist "%ENTRY%" goto :no_entry
 
-rem ---- 1) interpreter recorded in the platform config ----
+rem ---- fast probe: pythonw.exe in well-known locations ----
+rem      (a plain "if exist" chain is far faster than scanning PATH,
+rem       and speed matters here: the console window is visible
+rem       until this script exits)
+set "PYW="
+for %%C in (
+    "E:\Python312\pythonw.exe"
+    "C:\Python312\pythonw.exe"
+    "C:\Python313\pythonw.exe"
+    "C:\Python314\pythonw.exe"
+    "E:\Python313\pythonw.exe"
+    "E:\Python314\pythonw.exe"
+    "E:\Python311\pythonw.exe"
+    "C:\Python311\pythonw.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python312\pythonw.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python313\pythonw.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python311\pythonw.exe"
+) do (
+    if not defined PYW if exist "%%~C" set "PYW=%%~C"
+)
+
+if defined PYW goto :launch
+
+rem ---- fallback: ask the system (only when the above all miss) ----
+for /f "delims=" %%P in ('where pythonw 2^>nul') do (
+    if not defined PYW set "PYW=%%P"
+)
+if defined PYW goto :launch
+
+rem ---- last resort: derive pythonw.exe from a plain python.exe on PATH ----
 set "PY="
-set "CFG=%ROOT%data\config.json"
-if exist "%CFG%" (
-    for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try{(Get-Content -LiteralPath '%CFG%' -Raw -Encoding UTF8 ^| ConvertFrom-Json).platform.python_path}catch{''}"`) do (
-        if exist "%%P" set "PY=%%P"
-    )
+for /f "delims=" %%P in ('where python 2^>nul') do (
+    if not defined PY set "PY=%%P"
 )
-
-rem ---- 2) probe well-known locations ----
-if not defined PY (
-    for %%C in (
-        "E:\Python312\python.exe"
-        "C:\Python312\python.exe"
-        "C:\Python313\python.exe"
-        "C:\Python314\python.exe"
-        "E:\Python313\python.exe"
-        "E:\Python314\python.exe"
-        "E:\Python311\python.exe"
-        "C:\Python311\python.exe"
-        "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-        "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
-        "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-    ) do (
-        if not defined PY if exist "%%~C" set "PY=%%~C"
-    )
-)
-
-rem ---- 3) py launcher, then PATH ----
-set "PYARGS="
-if not defined PY (
-    if exist "%SystemRoot%\py.exe" (
-        set "PY=%SystemRoot%\py.exe"
-        set "PYARGS=-3"
-    )
-)
-if not defined PY (
-    for /f "delims=" %%P in ('where python 2^>nul') do (
-        if not defined PY set "PY=%%P"
-    )
-)
-
 if not defined PY goto :no_python
+set "PYW=!PY:python.exe=pythonw.exe!"
+if not exist "!PYW!" goto :no_python
 
-rem ---- 4) start: banner + version check + launch, all in python ----
-"!PY!" !PYARGS! "!BOOT!" "!ENTRY!" "!PY!"
-set "RC=!ERRORLEVEL!"
-
-echo.
-if "!RC!"=="0" (
-    echo   StarPort stopped normally. / StarPort yi zheng chang tui chu.
-) else (
-    echo   StarPort exited with code !RC!
-)
-echo.
-pause
-endlocal
-exit /b !RC!
+:launch
+rem pythonw.exe creates no console window at all, and `start` + exit
+rem closes this script's own console immediately.
+start "" "!PYW!" "!ENTRY!"
+exit /b 0
 
 
 :no_entry
@@ -89,24 +77,12 @@ exit /b 1
 
 :no_python
 echo.
-echo   [ERROR] Python not found. Python 3.10+ is required.
+echo   [ERROR] pythonw.exe not found. Python 3.10+ is required.
+echo.
 echo   Download: https://www.python.org/downloads/
 echo   During install, tick "Add python.exe to PATH".
 echo.
-pause
-exit /b 1
-
-:bad_python
-echo.
-echo   [ERROR] Cannot run Python: %PY%
-echo.
-pause
-exit /b 1
-
-:old_python
-echo.
-echo   [ERROR] Python too old: !VER!  (need 3.10+)
-echo   Interpreter: %PY%
+echo   You can also try the debug launcher, which shows details.
 echo.
 pause
 exit /b 1

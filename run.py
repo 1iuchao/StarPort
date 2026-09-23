@@ -21,9 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import console                                  # noqa: E402
 
-console.setup()          # ★ 必须最早调用：否则 Windows 下中文日志可能抛编码异常
+# ★ 必须最早调用：pythonw 无窗口运行时把日志重定向到文件，否则 print 会当场崩
+HEADLESS = console.setup()
 
-from core import paths                                    # noqa: E402
+from core import jobobj, paths                            # noqa: E402
 from core.hotkey import HOTKEY                            # noqa: E402
 from core.server import CTX, serve                        # noqa: E402
 from core.settings import CONFIG                          # noqa: E402
@@ -80,14 +81,34 @@ def main() -> int:             # noqa: C901
     args = parser.parse_args()
 
     if sys.version_info < (3, 10):
-        print("需要 Python 3.10 或更高版本")
+        msg = "需要 Python 3.10 或更高版本"
+        print(msg)
+        if HEADLESS:
+            console.notify("StarPort 启动失败", msg)
         return 1
 
     paths.ensure_dirs()
     if args.port:
         CONFIG.platform["port_base"] = args.port
 
-    httpd, port = serve(port=args.port or 0, background=True)
+    # ★ 建立 Job Object：平台一旦退出（含被任务管理器强杀），
+    #   OS 会连带回收所有应用进程，不留孤儿占端口
+    job_ok = jobobj.setup()
+    print(f"[StarPort] 孤儿进程兜底："
+          f"{'已启用（Job Object）' if job_ok else '不可用 —— ' + jobobj.PLATFORM_JOB.error}")
+
+    try:
+        httpd, port = serve(port=args.port or 0, background=True)
+    except Exception as exc:
+        base = CONFIG.platform.get("port_base")
+        msg = (f"平台启动失败：{exc}\n\n"
+               f"常见原因：{base} 起的连续端口都被占用。\n"
+               f"换个端口再试：run.py --port 19500")
+        print(f"[StarPort] {msg}")
+        if HEADLESS:
+            console.notify("StarPort 启动失败", msg)
+        return 1
+
     CTX.apply_runtime = _apply_runtime
     print(f"[StarPort] 平台已启动：http://127.0.0.1:{port}/  "
           f"(应用数 {len(CTX.registry.all())})")
@@ -123,6 +144,8 @@ def main() -> int:             # noqa: C901
         httpd.server_close()
     except Exception:
         pass
+    # 关闭 job 句柄：此刻 job 内若还有漏网进程，会被 OS 立即回收
+    jobobj.PLATFORM_JOB.close()
     print("[StarPort] 已退出")
     return 0
 

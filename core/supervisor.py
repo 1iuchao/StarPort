@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import paths, ports
+from . import jobobj, paths, ports
 from .registry import (TYPE_EXTERNAL, TYPE_STATIC, TYPE_WEBSERVICE,
                        AppMeta, Registry)
 from .settings import CONFIG
@@ -189,6 +189,10 @@ class Supervisor:
             rt.proc, rt.port, rt.log = proc, port, log_path
             rt.status, rt.error, rt.exit_code = STATUS_STARTING, None, None
             rt.pid, rt.started_at = proc.pid, time.time()
+
+            # ★ 挂进平台的 Job Object：平台若被强杀，OS 会连带回收这个进程，
+            #   避免它变成孤儿继续占端口（详见 core/jobobj.py）
+            jobobj.PLATFORM_JOB.assign(proc)
 
             ok = self._wait_ready(meta, rt)
             if not ok:
