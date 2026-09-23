@@ -1,0 +1,8 @@
+# StarPort 内核零第三方依赖，运行不需要 pip install 任何东西。
+
+# 可选：装了之后窗口会升级为真原生窗口（否则自动用 Edge/Chrome 的 --app 模式）
+# pip install pywebview
+#
+# 系统要求：
+#   - Python >= 3.10
+#   - Windows 10/11（开机自启与全局快捷键依赖 Win32，其他平台自动降级）

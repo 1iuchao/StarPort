@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StarPort · 星港</title>
+<link rel="stylesheet" href="/shell/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='%236ea8fe'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%236ea8fe' stroke-opacity='.45' stroke-width='2'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ──────────────────────────────  侧栏  ────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">星</div>
+      <div class="brand-text">
+        <div class="brand-name">StarPort</div>
+        <div class="brand-sub">本地应用聚合平台</div>
+      </div>
+    </div>
+
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path>
+      </svg>
+      <input id="search" type="search" placeholder="搜索应用…  (Ctrl+K)" autocomplete="off" spellcheck="false">
+    </div>
+
+    <nav id="nav" class="nav" aria-label="应用导航"></nav>
+
+    <div class="sidebar-foot">
+      <button id="btn-settings" class="foot-btn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+        设置
+      </button>
+      <div id="platform-stat" class="platform-stat">—</div>
+    </div>
+  </aside>
+
+  <!-- ──────────────────────────────  主区  ────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span id="cur-icon" class="cur-icon">星</span>
+        <div>
+          <div id="cur-name" class="cur-name">StarPort · 星港</div>
+          <div id="cur-sub" class="cur-sub">从左侧选择一个应用开始</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span id="cur-status" class="pill pill-idle" hidden></span>
+        <button id="btn-restart" class="tbtn" type="button" title="重启当前应用" hidden>重启</button>
+        <button id="btn-stop" class="tbtn" type="button" title="停止当前应用" hidden>停止</button>
+        <button id="btn-popout" class="tbtn" type="button" title="在系统浏览器里打开" hidden>新窗口</button>
+      </div>
+    </header>
+
+    <section class="stage">
+      <div id="overlay" class="overlay">
+        <div class="overlay-card">
+          <div class="overlay-glyph">🛰</div>
+          <h2 id="ov-title">选择一个应用</h2>
+          <p id="ov-desc">左侧列表里的每个应用都跑在独立进程中，互不干扰。</p>
+          <pre id="ov-log" class="ov-log" hidden></pre>
+          <div id="ov-actions" class="ov-actions"></div>
+        </div>
+      </div>
+      <iframe id="frame" class="frame" title="应用视图" referrerpolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
+    </section>
+  </main>
+</div>
+
+<!-- ──────────────────────────────  设置面板  ────────────────────────────── -->
+<div id="settings" class="modal" hidden>
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button class="icon-btn" data-close="1" type="button" aria-label="关闭">✕</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="general" type="button">通用</button>
+      <button class="tab" data-tab="apps" type="button">应用管理</button>
+      <button class="tab" data-tab="data" type="button">数据与备份</button>
+      <button class="tab" data-tab="about" type="button">关于</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- 通用 -->
+      <div class="tabpage active" data-page="general">
+        <div class="row">
+          <label for="s-theme">主题</label>
+          <select id="s-theme">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="s-window">窗口模式</label>
+          <select id="s-window">
+            <option value="auto">自动（推荐）</option>
+            <option value="edge">Edge 应用窗口</option>
+            <option value="chrome">Chrome 应用窗口</option>
+            <option value="browser">系统默认浏览器</option>
+            <option value="pywebview">pywebview（需安装）</option>
+            <option value="none">不开窗口</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="s-python">Python 解释器</label>
+          <input id="s-python" type="text" spellcheck="false">
+          <p class="hint">webservice 型应用用它启动（manifest 里的 <code>{python}</code>）</p>
+        </div>
+        <div class="row">
+          <label for="s-port">平台端口</label>
+          <input id="s-port" type="number" min="1024" max="65535">
+          <p class="hint">应用端口从「平台端口 + 100」开始自动分配</p>
+        </div>
+        <hr>
+        <div class="row row-switch">
+          <label for="s-autostart">开机自启</label>
+          <input id="s-autostart" type="checkbox">
+          <p class="hint" id="autostart-hint"></p>
+        </div>
+        <div class="row row-switch">
+          <label for="s-hotkey-en">全局快捷键</label>
+          <input id="s-hotkey-en" type="checkbox">
+          <div class="hotkey-row">
+            <label><input type="checkbox" id="hk-ctrl" value="ctrl"> Ctrl</label>
+            <label><input type="checkbox" id="hk-alt" value="alt"> Alt</label>
+            <label><input type="checkbox" id="hk-shift" value="shift"> Shift</label>
+            <label><input type="checkbox" id="hk-win" value="win"> Win</label>
+            <span class="plus">+</span>
+            <input id="hk-key" class="hk-key" type="text" maxlength="5" spellcheck="false">
+          </div>
+          <p class="hint" id="hotkey-hint"></p>
+        </div>
+        <div class="row row-switch">
+          <label for="s-autorestart">应用崩溃后自动重启</label>
+          <input id="s-autorestart" type="checkbox">
+          <p class="hint">最多连续重启 3 次，之后停在崩溃状态等人工处理</p>
+        </div>
+        <div class="row row-switch">
+          <label for="s-closeexit">关闭窗口时退出平台</label>
+          <input id="s-closeexit" type="checkbox">
+          <p class="hint">关掉后在回收所有应用进程；取消勾选则平台继续在后台跑</p>
+        </div>
+      </div>
+
+      <!-- 应用管理 -->
+      <div class="tabpage" data-page="apps">
+        <div id="app-admin" class="app-admin"></div>
+        <hr>
+        <h3>接入新应用</h3>
+        <p class="hint">把 manifest 内容粘进来（或填一个含 manifest.json 的目录路径），即可注册。应用代码不需要放进平台目录。</p>
+        <div class="row">
+          <label for="inst-source">目录路径</label>
+          <input id="inst-source" type="text" placeholder="例：E:/MyApp 或 E:/MyApp/manifest.json" spellcheck="false">
+        </div>
+        <div class="row">
+          <label for="inst-manifest">manifest JSON</label>
+          <textarea id="inst-manifest" rows="8" spellcheck="false" placeholder='{"id":"myapp","name":"我的应用","type":"webservice", ...}'></textarea>
+        </div>
+        <div class="row">
+          <button id="btn-install" class="primary" type="button">安装</button>
+          <button id="btn-reload" class="ghost" type="button">重新扫描 apps/</button>
+          <span id="install-msg" class="inline-msg"></span>
+        </div>
+      </div>
+
+      <!-- 数据与备份 -->
+      <div class="tabpage" data-page="data">
+        <div class="row">
+          <button id="btn-export" class="primary" type="button">导出配置</button>
+          <button id="btn-import" class="ghost" type="button">导入配置</button>
+          <input id="file-import" type="file" accept="application/json" hidden>
+          <p class="hint">导出内容包含：平台设置、置顶/最近使用、应用启用状态，以及各应用的 manifest。</p>
+        </div>
+        <hr>
+        <div id="sys-info" class="sys-info"></div>
+      </div>
+
+      <!-- 关于 -->
+      <div class="tabpage" data-page="about">
+        <h3>StarPort · 星港</h3>
+        <p class="hint">本地应用聚合平台：统一入口、插件化接入、进程隔离、离线可用。</p>
+        <ul class="about-list">
+          <li><b>内核</b>：Python 标准库，无第三方依赖</li>
+          <li><b>界面</b>：原生窗口 + iframe 承载应用视图</li>
+          <li><b>隔离</b>：每个应用独立进程 + 独立端口，崩溃互不影响</li>
+          <li><b>数据</b>：全部落在 <code>StarPort/data/</code>，不联网</li>
+        </ul>
+        <hr>
+        <h3>接入契约</h3>
+        <p class="hint">一个应用 = 一个目录 + 一份 <code>manifest.json</code>。类型：</p>
+        <ul class="about-list">
+          <li><b>webservice</b>：拉起本地服务进程，健康检查通过后嵌入</li>
+          <li><b>static</b>：纯前端页面，由平台静态托管</li>
+          <li><b>external</b>：原生程序，平台负责启动与回收</li>
+        </ul>
+        <p class="hint">详见 <code>README.md</code> 与 <code>apps/filecleanup/manifest.json</code>。</p>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <span id="save-msg" class="save-msg"></span>
+      <button id="btn-save" class="primary" type="button">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<script src="/shell/shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "id": "filecleanup",
+  "name": "FileCleanup",
+  "version": "1.0.0",
+  "type": "webservice",
+  "category": "系统工具",
+  "description": "磁盘空间分析：递归扫描 → 横向树状图 → 挑出大文件 → 二次确认后清理",
+  "author": "1iuchao",
+  "icon": "icon.svg",
+  "tags": ["磁盘", "清理", "扫描", "空间", "大文件"],
+
+  "entry": {
+    "command": ["{python}", "run.py", "--port", "{port}", "--no-browser"],
+    "cwd": "E:/Filecleanup",
+    "env": {
+      "FC_MAX_DEPTH": "256"
+    }
+  },
+
+  "health": {
+    "path": "/api/health",
+    "timeout": 25,
+    "stdout_port_pattern": "服务已启动：http://127\\.0\\.0\\.1:(\\d+)/"
+  },
+
+  "view": {
+    "mode": "iframe",
+    "path": "/"
+  },
+
+  "stop": {
+    "method": "http",
+    "path": "/api/shutdown"
+  },
+
+  "notes": "示例：外部 Python 应用接入。平台拉起 run.py，等 /api/health 通过后把界面嵌进 iframe；退出时先 POST /api/shutdown 优雅收摊。"
+}

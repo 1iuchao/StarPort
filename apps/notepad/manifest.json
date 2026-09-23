@@ -1,0 +1,16 @@
+{
+  "id": "notepad",
+  "name": "星港便笺",
+  "version": "0.1.0",
+  "type": "static",
+  "category": "内置模块",
+  "description": "示例：static 型应用（纯前端页面由平台托管，数据存在浏览器 localStorage）",
+  "tags": ["便笺", "记事", "示例"],
+
+  "view": {
+    "mode": "iframe",
+    "path": "index.html"
+  },
+
+  "notes": "static 型没有子进程，由平台直接托管静态文件。适合纯前端的内部功能模块。"
+}
