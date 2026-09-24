@@ -556,6 +556,7 @@ function fillSettings() {
   $('#s-autostart').checked = !!p.autostart;
   $('#s-autorestart').checked = !!p.auto_restart_on_crash;
   $('#s-closeexit').checked = p.close_exits_platform !== false;
+  $('#s-autolaunch').checked = !!p.auto_launch_last;
 
   const hk = p.hotkey || {};
   $('#s-hotkey-en').checked = hk.enabled !== false;
@@ -650,6 +651,7 @@ async function saveSettings() {
     autostart: $('#s-autostart').checked,
     auto_restart_on_crash: $('#s-autorestart').checked,
     close_exits_platform: $('#s-closeexit').checked,
+    auto_launch_last: $('#s-autolaunch').checked,
     hotkey: {
       enabled: $('#s-hotkey-en').checked,
       modifiers: ['ctrl', 'alt', 'shift', 'win'].filter(m => $('#hk-' + m).checked),
@@ -681,6 +683,14 @@ function appBlendOn() {
 function appMaterialOn() {
   const p = S.settings.platform || {};
   return p.appMaterial !== false;
+}
+
+/* 启动时是否自动拉起上次打开的应用。默认关 ——
+   "开个平台就顺手起一个应用进程"是负担而不是贴心：白占内存、白占端口，
+   还可能让人以为卡住了。想要的人在设置里打开，不替用户做这个决定。 */
+function restoreLastApp() {
+  const p = S.settings.platform || {};
+  return p.auto_launch_last === true;
 }
 
 function applyTheme() {
@@ -1146,7 +1156,8 @@ async function boot(autoLaunch = true) {
   setInterval(() => api('/api/heartbeat').catch(() => {}), 10000);
   api('/api/heartbeat').catch(() => {});
 
-  if (autoLaunch && S.state.last_active && appById(S.state.last_active)) {
+  if (autoLaunch && restoreLastApp() &&
+      S.state.last_active && appById(S.state.last_active)) {
     openApp(S.state.last_active);
   }
 }

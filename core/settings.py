@@ -33,6 +33,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_restart_on_crash": False,
         "close_exits_platform": True,     # 关掉窗口即退出平台（含回收应用进程）
         "confirm_before_uninstall": True,
+        # 启动时是否自动拉起上次打开的应用。默认关：
+        # 开个平台就顺手起一个应用进程，对多数人是负担而不是贴心。
+        "auto_launch_last": False,
     },
     # 应用级覆盖：enabled(启用/禁用) / category(分类) / pinned 由 state 管
     "apps": {},
