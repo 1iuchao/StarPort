@@ -11,6 +11,7 @@ import json
 import mimetypes
 import os
 import socket
+import string
 import sys
 import threading
 import time
@@ -77,6 +78,74 @@ def _within_root(path: Path) -> bool:
         return str(path.resolve()).startswith(str(paths.ROOT.resolve()))
     except Exception:
         return False
+
+
+# ------------------------------------------------------------ 本机目录浏览
+MANIFEST_NAME = "manifest.json"
+
+
+def fs_roots() -> list[dict[str, Any]]:
+    """可用的起始位置：Windows 列存在的盘符，其他系统给根目录 + 家目录。"""
+    out: list[dict[str, Any]] = []
+    if os.name == "nt":
+        for letter in string.ascii_uppercase:
+            p = f"{letter}:\\"
+            try:
+                if os.path.isdir(p):
+                    out.append({"name": f"{letter}: 盘", "path": p})
+            except Exception:
+                continue
+    if not out:
+        out.append({"name": "根目录", "path": os.path.abspath(os.sep)})
+        out.append({"name": "个人目录", "path": str(Path.home())})
+    return out
+
+
+def fs_list(raw: str) -> dict[str, Any]:
+    """列出一个目录：子目录 + 该目录下的 manifest.json。
+
+    只给"挑目录"用，不返回任何文件内容；没权限 / 不存在都给出人话错误。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {"ok": False, "error": "请先给一个路径"}
+    target = Path(os.path.expanduser(raw))
+    if not target.is_dir():
+        return {"ok": False, "error": f"不是目录：{raw}"}
+    try:
+        base = target.resolve()
+        entries: list[dict[str, Any]] = []
+        for child in base.iterdir():
+            if child.name.startswith("."):
+                continue
+            try:
+                if child.is_dir():
+                    entries.append({
+                        "name": child.name, "path": str(child), "is_dir": True,
+                        "has_manifest": (child / MANIFEST_NAME).is_file(),
+                    })
+                elif child.name == MANIFEST_NAME:
+                    entries.append({
+                        "name": child.name, "path": str(child), "is_dir": False,
+                        "has_manifest": True,
+                    })
+            except OSError:
+                continue                     # 单个条目无权访问就跳过，不影响整页
+        entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+        parent = str(base.parent)
+        if parent == str(base):
+            parent = ""
+        return {
+            "ok": True,
+            "path": str(base),
+            "parent": parent,
+            "entries": entries,
+            "has_manifest": (base / MANIFEST_NAME).is_file(),
+        }
+    except PermissionError:
+        return {"ok": False, "error": f"没有权限读取：{raw}"}
+    except OSError as exc:
+        return {"ok": False, "error": f"读取失败：{exc}"}
 
 
 # ------------------------------------------------------------------ handler
@@ -304,6 +373,13 @@ class Handler(BaseHTTPRequestHandler):
                                 (".mp4", ".webm", ".mov", ".m4v") else "image",
                     })
             return self._json({"ok": True, "items": items})
+        # ---- 本机目录浏览：给「设置 → 应用管理 → 浏览」挑目录用。
+        #     只列目录和 manifest.json，不提供任意文件内容 —— 不给它变成文件服务器的机会。
+        if path == "/api/fs/roots":
+            return self._json({"ok": True, "roots": fs_roots()})
+        if path == "/api/fs/list":
+            return self._json(fs_list((query.get("path") or [""])[0]))
+
         if path == "/api/system":
             from . import autostart, hotkey, window
             return self._json({

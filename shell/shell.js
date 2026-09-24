@@ -976,6 +976,120 @@ async function doImport(file) {
   } catch (e) { alert('导入失败：' + e.message); }
 }
 
+/* ────────────────────────────── 目录选择器 ──────────────────────────────
+   接入新应用时不该手抄路径 —— 平台只服务 127.0.0.1，所以让内核去列本机目录，
+   前端做一个能双击进入的选择器即可（内核不返回任何文件内容）。 */
+const PICKER = { path: '', parent: '', entries: [], roots: [], selected: null, hasManifest: false };
+
+async function openPicker() {
+  $('#picker').hidden = false;
+  $('#pick-msg').textContent = '';
+  PICKER.selected = null;
+
+  const roots = await api('/api/fs/roots');
+  PICKER.roots = roots.ok ? (roots.roots || []) : [];
+
+  /* 起始位置：输入框已有路径 → 用它；否则落在平台根目录附近
+     （默认从第一个盘符开始的话，多数人得从 C:\ 一路翻到自己的盘） */
+  const start = $('#inst-source').value.trim() || (S.sys && S.sys.root) || '';
+  if (start) {
+    const r = await api('/api/fs/list?path=' + encodeURIComponent(start));
+    if (r.ok) { setDir(r); renderPicker(); return; }
+  }
+  if (PICKER.roots.length) await loadDir(PICKER.roots[0].path);
+  else renderPicker();
+}
+
+function closePicker() { $('#picker').hidden = true; }
+
+function setDir(r) {
+  PICKER.path = r.path;
+  PICKER.parent = r.parent || '';
+  PICKER.entries = r.entries || [];
+  PICKER.hasManifest = !!r.has_manifest;
+  PICKER.selected = null;
+}
+
+async function loadDir(p) {
+  const r = await api('/api/fs/list?path=' + encodeURIComponent(p));
+  if (!r.ok) {
+    const el = $('#pick-msg');
+    el.className = 'save-msg err';
+    el.textContent = r.error || '打不开这个目录';
+    return;
+  }
+  setDir(r);
+  renderPicker();
+}
+
+function renderPicker() {
+  const msg = $('#pick-msg');
+  msg.className = 'save-msg';
+  msg.textContent = '';
+  $('#pick-path').textContent = PICKER.path || '—';
+  $('#pick-up').disabled = !PICKER.parent;
+
+  const drives = $('#pick-drives');
+  drives.innerHTML = '';
+  const cur = (PICKER.path || '').toLowerCase();
+  PICKER.roots.forEach(r => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tbtn' + (cur.startsWith(r.path.toLowerCase()) ? ' on' : '');
+    b.textContent = r.name;
+    b.onclick = () => loadDir(r.path);
+    drives.appendChild(b);
+  });
+
+  const list = $('#pick-list');
+  list.innerHTML = '';
+  if (!PICKER.entries.length) {
+    list.innerHTML = '<div class="picker-empty">这个目录里没有子文件夹</div>';
+  }
+  PICKER.entries.forEach(e => {
+    const el = document.createElement('div');
+    el.className = 'picker-item' +
+      (PICKER.selected && PICKER.selected.path === e.path ? ' active' : '');
+    el.innerHTML =
+      `<span class="pick-glyph">${e.is_dir ? '📁' : '📄'}</span>` +
+      `<span class="pick-name"></span>` +
+      (e.has_manifest ? '<span class="badge">manifest.json</span>' : '');
+    el.querySelector('.pick-name').textContent = e.name;
+    el.onclick = () => { PICKER.selected = e; renderPicker(); };
+    if (e.is_dir) el.ondblclick = () => loadDir(e.path);
+    list.appendChild(el);
+  });
+
+  pickHint();
+}
+
+function pickHint() {
+  const el = $('#pick-msg');
+  const ok = $('#pick-ok');
+  const sel = PICKER.selected;
+  ok.disabled = !PICKER.path;
+  ok.textContent = (sel && !sel.is_dir) ? '使用这个文件' : '使用这个目录';
+  if (!PICKER.path) return;
+  const has = sel ? !!sel.has_manifest : PICKER.hasManifest;
+  if (sel && !sel.is_dir) {
+    el.className = 'save-msg';
+    el.textContent = '将用这个 manifest.json 安装';
+  } else if (has) {
+    el.className = 'save-msg';
+    el.textContent = '这个目录里有 manifest.json';
+  } else {
+    el.className = 'save-msg err';
+    el.textContent = '这个目录里没有 manifest.json';
+  }
+}
+
+function pickOk() {
+  const value = PICKER.selected ? PICKER.selected.path : PICKER.path;
+  if (!value) return;
+  $('#inst-source').value = value;
+  closePicker();
+}
+
 /* ────────────────────────────── 安装应用 ────────────────────────────── */
 async function doInstall() {
   const source = $('#inst-source').value.trim();
@@ -1044,6 +1158,7 @@ function bind() {
       e.preventDefault(); $('#search').focus(); $('#search').select();
     }
     if (e.key === 'Escape' && !$('#settings').hidden) closeSettings();
+    if (e.key === 'Escape' && !$('#picker').hidden) closePicker();
   });
 
   $('#btn-settings').onclick = () => openSettings();
@@ -1062,6 +1177,12 @@ function bind() {
   };
   $('#btn-install').onclick = doInstall;
   $('#btn-reload').onclick = async () => { await reloadApps(); renderNav(); renderAppAdmin(); };
+
+  /* ---- 目录选择器 ---- */
+  $('#btn-browse').onclick = openPicker;
+  $('#pick-up').onclick = () => { if (PICKER.parent) loadDir(PICKER.parent); };
+  $('#pick-ok').onclick = pickOk;
+  $$('[data-pclose]').forEach(el => el.onclick = closePicker);
 
   /* ---- 应用区融合开关：即时生效并推给已打开的应用 ---- */
   $('#s-blend').onchange = (e) => {

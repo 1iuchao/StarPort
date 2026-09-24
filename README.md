@@ -234,7 +234,7 @@ E:/Python312/python.exe run.py --port 19500   # 指定端口
 - **置顶** —— 应用条目右侧 ☆/★ 一键切换，存 `data/state.json`
 - **设置** —— 主题（深/浅）、窗口模式、Python 解释器、平台端口、开机自启、
   全局快捷键（默认 `Ctrl+Alt+S` 唤起窗口）、崩溃自动重启、关闭窗口是否退出平台
-- **应用管理** —— 启用/禁用、卸载（含文件）、从目录或 manifest 直接安装、重新扫描
+- **应用管理** —— 启用/禁用、卸载（含文件）、从目录或 manifest 直接安装（目录可用「浏览…」点选，不用手抄路径）、重新扫描
 - **数据** —— 一键导出/导入 `starport-config.json`（设置 + 置顶 + 启用状态 + 各应用 manifest）
 
 ---
@@ -249,7 +249,7 @@ E:/Python312/python.exe run.py --port 19500   # 指定端口
 4. 启动后往 stdout 打一行 `服务已启动：http://127.0.0.1:<端口>/`（平台据此抓真实端口；
    用 `sdk/starport_sdk.py` 的 `announce(port)` 即可）；
 5. 写 manifest，放到 `apps/<id>/manifest.json`；
-6. 平台点「设置 → 应用管理 → 重新扫描」，或直接
+6. 平台点「设置 → 应用管理 → 浏览…」选中应用目录，或直接用
    `python tools/install_app.py E:/你的应用目录`。
 
 ### 场景 B：纯前端页面（`static`）

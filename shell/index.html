@@ -240,7 +240,11 @@
         <p class="hint">把 manifest 内容粘进来（或填一个含 manifest.json 的目录路径），即可注册。应用代码不需要放进平台目录。</p>
         <div class="row">
           <label for="inst-source">目录路径</label>
-          <input id="inst-source" type="text" placeholder="例：E:/MyApp 或 E:/MyApp/manifest.json" spellcheck="false">
+          <div class="path-row">
+            <input id="inst-source" type="text" placeholder="例：E:/MyApp 或 E:/MyApp/manifest.json" spellcheck="false">
+            <button class="ghost" id="btn-browse" type="button">浏览…</button>
+          </div>
+          <p class="hint">点「浏览…」在本机目录里直接挑（双击进入文件夹），也可以把路径粘进来。</p>
         </div>
         <div class="row">
           <label for="inst-manifest">manifest JSON</label>
@@ -290,6 +294,30 @@
     <div class="modal-foot">
       <span id="save-msg" class="save-msg"></span>
       <button id="btn-save" class="primary" type="button">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────────── 目录选择器（接入新应用时挑目录） ───────────────── -->
+<div id="picker" class="modal" hidden>
+  <div class="modal-backdrop" data-pclose="1"></div>
+  <div class="modal-panel picker-panel surface surface--blur">
+    <div class="modal-head">
+      <h2>选择应用目录</h2>
+      <button class="icon-btn" data-pclose="1" type="button" aria-label="关闭">✕</button>
+    </div>
+
+    <div class="picker-bar">
+      <button class="tbtn" id="pick-up" type="button" title="上一级">↑ 上级</button>
+      <div class="picker-path" id="pick-path">—</div>
+    </div>
+    <div class="picker-drives" id="pick-drives"></div>
+    <div class="picker-list" id="pick-list"></div>
+
+    <div class="modal-foot">
+      <span id="pick-msg" class="save-msg"></span>
+      <button class="ghost" data-pclose="1" type="button">取消</button>
+      <button class="primary" id="pick-ok" type="button">使用这个目录</button>
     </div>
   </div>
 </div>
