@@ -21,6 +21,17 @@ const STATUS_TEXT = {
   crashed: '已崩溃', error: '启动失败',
 };
 
+/* 应用类型的"人话解释"。介绍页用 —— 别把 webservice 这种内部术语直接怼给用户 */
+const TYPE_INFO = {
+  webservice: { label: '独立进程服务',
+    how: '平台拉起一个本地进程，健康检查通过后把界面嵌进来。它崩了平台照常跑。' },
+  static: { label: '静态页面',
+    how: '纯前端页面，由平台直接托管，不额外起进程。' },
+  external: { label: '外部原生程序',
+    how: '平台只负责启动与回收，界面在系统自己的窗口里，不嵌进星港。' },
+};
+const typeInfo = (t) => TYPE_INFO[t] || { label: t || '未知类型', how: '' };
+
 /* 10 套页面材质。切换 = 改变量，预览色块靠 CSS 变量继承"活体"渲染。 */
 const MATERIALS = [
   { id: 'liquid-glass', name: '液态玻璃', en: 'Liquid Glass' },
@@ -137,12 +148,32 @@ function makeItem(app, opts = {}) {
       const r = await post(`/api/apps/${app.id}/pin`, { pinned: !app.pinned });
       if (r.ok) { app.pinned = !app.pinned; renderNav(); }
     };
+    /* 连点两下置顶不该变成"启动" —— dblclick 是独立事件，click 里 stopPropagation 拦不住 */
+    pin.ondblclick = (e) => e.stopPropagation();
     acts.appendChild(pin);
     el.appendChild(acts);
   }
 
-  el.onclick = () => openApp(app.id);
+  /* 单击 = 看介绍（不拉起进程）；双击 = 启动。
+     键盘：Enter 启动、空格看介绍 —— 双击对键盘用户不可达，必须留等价入口。 */
+  el.title = `${app.name}｜单击看介绍，双击启动`;
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.onclick = () => selectApp(app.id);
+  el.ondblclick = (e) => { e.preventDefault(); openApp(app.id); };
+  el.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); openApp(app.id); }
+    else if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); selectApp(app.id); }
+  };
   return el;
+}
+
+/* 只改高亮，不重建 DOM。
+   ⚠️ 这里必须"原地改 class"而不是 renderNav()：双击的第二次点击若落在被重建过的
+   节点上，dblclick 有可能不再触发（click 的目标节点已被替换），
+   表现就是"双击偶尔失灵"。所以单击路径一律不重建列表。 */
+function markActive(id) {
+  $$('.app-item').forEach(el => el.classList.toggle('active', el.dataset.id === id));
 }
 
 function renderNav() {
@@ -194,17 +225,192 @@ function renderNav() {
   }
 }
 
+/* ─────────────────── 应用介绍页（单击 = 看，双击 = 启动） ───────────────────
+   单击列表项只渲染介绍，绝不拉起进程 —— 避免"随手一点就起一个 Python 进程"。
+   介绍页是覆盖在 iframe 之上的一层（z-index 4），iframe 用 visibility 隐藏，
+   既不卸载页面、也不打断应用里的状态。 */
+function introVisible() {
+  const el = $('#intro');
+  return !!el && !el.hidden;
+}
+
+function showCurrentMeta(app) {
+  $('#cur-name').textContent = app.name;
+  $('#cur-sub').textContent = app.description || app.category || '';
+  $('#cur-icon').textContent = initial(app.name);
+}
+
+function selectApp(id) {
+  const app = appById(id);
+  if (!app) return;
+  /* 已经在看这个应用的画面了 → 单击不再把它换成介绍页（省得误触丢掉正在用的界面） */
+  if (S.currentId === id && !introVisible() && statusOf(id) === 'running') return;
+  S.currentId = id;
+  markActive(id);
+  showCurrentMeta(app);
+  setPill(statusOf(id));
+  showIntro(app);
+  syncTopbar();
+}
+
+function showIntro(app) {
+  const el = $('#intro');
+  if (!el || !app) return;
+  renderIntro(app);
+  el.hidden = false;
+  $('#overlay').classList.add('hidden');
+  $('#frame').classList.add('hidden');
+}
+
+function hideIntro() {
+  const el = $('#intro');
+  if (el) el.hidden = true;
+  $('#frame').classList.remove('hidden');
+}
+
+/* 从介绍页切回应用画面 */
+function showAppView() {
+  hideIntro();
+  const st = S.currentId && S.statuses[S.currentId];
+  const app = S.currentId && appById(S.currentId);
+  if (st && st.status === 'running' && st.url) {
+    hideOverlay();
+  } else if (st && st.status === 'running' && app) {
+    /* external 型：没有可嵌入的地址，把"已在外部启动"的说明摆回来 */
+    showOverlay('已在外部启动', `${app.name} 是原生程序，已在独立窗口中打开。`,
+      { actions: [{ label: '停止', cls: 'danger-btn', onClick: () => stopCurrent() }] });
+  }
+  syncTopbar();
+}
+
+function renderIntro(app) {
+  if (!app) return;
+
+  const icon = $('#in-icon');
+  icon.innerHTML = '';
+  if (app.icon) {
+    const im = document.createElement('img');
+    im.src = app.icon; im.alt = '';
+    icon.appendChild(im);
+  } else {
+    icon.textContent = initial(app.name);
+  }
+
+  $('#in-name').textContent = app.name;
+  const bits = ['v' + (app.version || '0.0.0')];
+  if (app.author) bits.push('作者 ' + app.author);
+  bits.push(app.category || '未分类');
+  $('#in-sub').textContent = bits.join(' · ');
+
+  const st = statusOf(app.id);
+  const pill = $('#in-status');
+  pill.className = 'pill pill-' + st;
+  pill.textContent = STATUS_TEXT[st] || st;
+  S._introStatus = st;
+
+  $('#in-desc').textContent = app.description || '这个应用还没有填写介绍。';
+
+  const tags = $('#in-tags');
+  tags.innerHTML = '';
+  (app.tags || []).forEach(t => {
+    const s = document.createElement('span');
+    s.className = 'badge';
+    s.textContent = t;
+    tags.appendChild(s);
+  });
+
+  const info = typeInfo(app.type);
+  const rows = [['类型', info.label], ['运行方式', info.how],
+                ['应用标识', app.id], ['目录', app.dir || '—']];
+  const url = (S.statuses[app.id] || {}).url;
+  if (st === 'running' && url) rows.push(['访问地址', url]);
+  if (app.notes) rows.push(['备注', app.notes]);
+  const facts = $('#in-facts');
+  facts.innerHTML = '';
+  rows.forEach(([k, v]) => {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v || '';
+    if (k === '目录' || k === '访问地址') dd.className = 'mono';
+    facts.append(dt, dd);
+  });
+
+  const iss = $('#in-issues');
+  if ((app.issues || []).length) {
+    iss.hidden = false;
+    iss.innerHTML = '<b>manifest 存在问题：</b><br>' +
+      (app.issues || []).map(escapeHtml).join('<br>');
+  } else {
+    iss.hidden = true;
+    iss.innerHTML = '';
+  }
+
+  renderIntroActions(app);
+}
+
+function renderIntroActions(app) {
+  const box = $('#in-actions');
+  if (!box) return;
+  box.innerHTML = '';
+  const st = statusOf(app.id);
+  const running = st === 'running';
+  const url = (S.statuses[app.id] || {}).url;
+  const add = (label, cls, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.onclick = fn;
+    box.appendChild(b);
+  };
+
+  if (!app.enabled) {
+    add('已禁用 · 去应用管理', 'primary', () => openSettings('apps'));
+  } else if (running) {
+    add('返回应用', 'primary', () => showAppView());
+    if (url) add('新窗口打开', 'ghost', () => window.open(withThemeParams(url), '_blank'));
+    add('停止', 'danger-btn', () => stopCurrent());
+  } else {
+    add('启动应用', 'primary', () => openApp(app.id));
+  }
+  add('应用管理', 'ghost', () => openSettings('apps'));
+}
+
+/* 顶栏按钮随"在看介绍 / 在看应用 / 应用状态"三者变化 */
+function syncTopbar() {
+  const app = S.currentId && appById(S.currentId);
+  const btnLaunch = $('#btn-launch'), btnRestart = $('#btn-restart');
+  const btnStop = $('#btn-stop'), btnPopout = $('#btn-popout');
+  if (!app) {
+    [btnLaunch, btnRestart, btnStop, btnPopout].forEach(b => { b.hidden = true; });
+    return;
+  }
+  const st = statusOf(app.id);
+  const running = st === 'running';
+  const url = (S.statuses[app.id] || {}).url;
+  const inIntro = introVisible();
+
+  /* 启动按钮只在"正在看介绍"时出现 —— 应用画面已经在眼前时不需要它 */
+  btnLaunch.hidden = !inIntro || !app.enabled;
+  btnLaunch.textContent = running ? '返回应用' : '启动应用';
+  btnLaunch.title = running ? '回到应用画面' : '启动这个应用';
+  btnLaunch.onclick = running ? showAppView : () => openApp(app.id);
+
+  btnRestart.hidden = !running || inIntro;
+  btnStop.hidden = !running || inIntro;
+  btnPopout.hidden = !running || inIntro || !url;
+}
+
 /* ────────────────────────────── 应用启停 ────────────────────────────── */
 async function openApp(id) {
   const app = appById(id);
   if (!app) return;
   S.currentId = id;
+  hideIntro();                       // 真的要启动了 → 介绍页收起
   renderNav();
-
-  $('#cur-name').textContent = app.name;
-  $('#cur-sub').textContent = app.description || app.category || '';
-  $('#cur-icon').textContent = initial(app.name);
-  ['#btn-restart', '#btn-stop', '#btn-popout'].forEach(s => $(s).hidden = false);
+  showCurrentMeta(app);
+  syncTopbar();
   setPill('starting');
 
   if (!app.enabled) {
@@ -212,6 +418,7 @@ async function openApp(id) {
       actions: [{ label: '去设置', cls: 'primary', onClick: () => openSettings('apps') }],
     });
     setPill('stopped');
+    syncTopbar();
     return;
   }
 
@@ -234,6 +441,7 @@ async function openApp(id) {
 
   S.statuses[id] = Object.assign(S.statuses[id] || {}, { status: 'running', url: r.url });
   setPill('running');
+  syncTopbar();
 
   if (!r.url) {                       // external 型：外部窗口，壳内不嵌入
     showOverlay('已在外部启动', `${app.name} 是原生程序，已在独立窗口中打开。`,
@@ -253,9 +461,16 @@ async function openApp(id) {
 async function stopCurrent() {
   if (!S.currentId) return;
   await post(`/api/apps/${S.currentId}/stop`, {});
+  setPill('stopped');
+  if (introVisible()) {
+    /* 在介绍页里点停止 → 不弹"已停止"覆盖层，把状态刷回介绍页即可 */
+    await refreshStatus();
+    renderIntro(appById(S.currentId));
+    syncTopbar();
+    return;
+  }
   showOverlay('已停止', '应用进程已回收。',
     { actions: [{ label: '重新启动', cls: 'primary', onClick: () => openApp(S.currentId) }] });
-  setPill('stopped');
   refreshStatus();
 }
 async function restartCurrent() {
@@ -294,10 +509,21 @@ async function refreshStatus() {
           { label: '停止', cls: 'ghost', onClick: () => stopCurrent() },
         ],
       });
-    } else if (cur.status === 'stopped' && $('#overlay').classList.contains('hidden')) {
+    } else if (cur.status === 'stopped' && !introVisible() &&
+               $('#overlay').classList.contains('hidden')) {
       setPill('stopped');
       showOverlay('应用已停止', '需要时重新启动即可。',
         { actions: [{ label: '重新启动', cls: 'primary', onClick: () => openApp(S.currentId) }] });
+    }
+  }
+
+  /* 介绍页上也挂着状态徽标与按钮 —— 只在状态真的变了时重绘，
+     否则每 3 秒刷一次会把鼠标悬停态和阅读位置冲掉。 */
+  if (introVisible() && S.currentId) {
+    const st = statusOf(S.currentId);
+    if (st !== S._introStatus) {
+      renderIntro(appById(S.currentId));
+      syncTopbar();
     }
   }
   const stat = $('#platform-stat');

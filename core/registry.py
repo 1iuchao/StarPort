@@ -42,6 +42,7 @@ class AppMeta:
     category: str = "未分类"
     description: str = ""
     author: str = ""
+    notes: str = ""                # manifest 里的补充说明，仅用于界面展示
     icon: str = ""
     tags: list[str] = field(default_factory=list)
     manifest: dict[str, Any] = field(default_factory=dict)
@@ -84,6 +85,7 @@ class AppMeta:
             "category": CONFIG.app_overrides(self.id).get("category", self.category),
             "description": self.description,
             "author": self.author,
+            "notes": self.notes,
             "tags": self.tags,
             "icon": self.icon_url,
             "enabled": self.enabled,
@@ -147,6 +149,7 @@ def _load_one(app_dir: Path) -> AppMeta | None:
         category=str(raw.get("category", "未分类")),
         description=str(raw.get("description", "")),
         author=str(raw.get("author", "")),
+        notes=str(raw.get("notes", "")),
         icon=str(raw.get("icon") or ""),
         tags=list(raw.get("tags") or []),
         manifest=raw,

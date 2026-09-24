@@ -34,6 +34,8 @@
       <input id="search" type="search" placeholder="搜索应用…  (Ctrl+K)" autocomplete="off" spellcheck="false">
     </div>
 
+    <div class="nav-hint">单击看介绍 · 双击启动</div>
+
     <nav id="nav" class="nav" aria-label="应用导航"></nav>
 
     <div class="sidebar-foot">
@@ -57,6 +59,7 @@
       </div>
       <div class="topbar-right">
         <span id="cur-status" class="pill pill-idle" hidden></span>
+        <button id="btn-launch" class="tbtn launch-btn" type="button" title="启动当前应用" hidden>启动应用</button>
         <button id="btn-restart" class="tbtn" type="button" title="重启当前应用" hidden>重启</button>
         <button id="btn-stop" class="tbtn" type="button" title="停止当前应用" hidden>停止</button>
         <button id="btn-popout" class="tbtn" type="button" title="在系统浏览器里打开" hidden>新窗口</button>
@@ -68,11 +71,33 @@
         <div class="overlay-card">
           <div class="overlay-glyph">🛰</div>
           <h2 id="ov-title">选择一个应用</h2>
-          <p id="ov-desc">左侧列表里的每个应用都跑在独立进程中，互不干扰。</p>
+          <p id="ov-desc">单击左侧应用看介绍，双击才启动 —— 不会误拉起进程。</p>
           <pre id="ov-log" class="ov-log" hidden></pre>
           <div id="ov-actions" class="ov-actions"></div>
         </div>
       </div>
+
+      <!-- 应用介绍页：单击左侧条目时展示（不启动进程） -->
+      <div id="intro" class="intro" hidden>
+        <div class="intro-card">
+          <div class="intro-head">
+            <div class="intro-icon" id="in-icon">星</div>
+            <div class="intro-title">
+              <h2 id="in-name">—</h2>
+              <div class="intro-sub" id="in-sub"></div>
+            </div>
+            <span id="in-status" class="pill pill-idle"></span>
+          </div>
+
+          <p class="intro-desc" id="in-desc"></p>
+          <div class="intro-tags" id="in-tags"></div>
+          <dl class="intro-facts" id="in-facts"></dl>
+          <div class="intro-issues" id="in-issues" hidden></div>
+          <div class="intro-actions" id="in-actions"></div>
+          <p class="intro-hint">单击列表项只看介绍；双击列表项（或点上面的「启动应用」）才真正拉起进程。</p>
+        </div>
+      </div>
+
       <iframe id="frame" class="frame" title="应用视图" referrerpolicy="no-referrer"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
     </section>

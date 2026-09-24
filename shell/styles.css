@@ -98,6 +98,13 @@ a { color: var(--accent); }
   pointer-events: none;
 }
 
+.nav-hint {
+  padding: 0 14px 6px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  letter-spacing: .3px;
+}
+
 .nav { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .nav::-webkit-scrollbar { width: 8px; }
 .nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -287,6 +294,87 @@ a { color: var(--accent); }
   white-space: pre-wrap; word-break: break-all;
 }
 .ov-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: center; }
+
+/* ───────────────────────  应用介绍页（单击列表项）  ───────────────────────
+   介绍页属于「第 2 层内容」，不自带底色 —— 背景与材质仍然由第 0/1 层透出来，
+   所以切材质、换背景时介绍页会跟着一起变，不会突出来一块死板的卡片。 */
+.intro {
+  position: absolute; inset: 0;
+  z-index: 4;                      /* 在 iframe 之上、overlay 之下 */
+  display: flex; align-items: center; justify-content: center;
+  padding: 28px;
+  overflow: auto;
+  border-radius: inherit;
+}
+.intro[hidden] { display: none; }
+.intro::-webkit-scrollbar { width: 8px; }
+.intro::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.intro-card {
+  width: min(720px, 100%);
+  /* 内容层可以加一个不依赖背景图的实底，保证用户上传任意图片时文字仍可读 ——
+     92% 不透明既保留"浮在材质上"的感觉，又提供足够的对比度 */
+  background: color-mix(in srgb, var(--solid) 92%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  box-shadow: 0 24px 70px var(--drop-1);
+}
+.intro-head { display: flex; align-items: center; gap: 14px; }
+.intro-icon {
+  width: 54px; height: 54px; flex: 0 0 54px;
+  border-radius: 15px;
+  display: grid; place-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  font-size: 23px; font-weight: 700;
+  overflow: hidden;
+}
+.intro-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.intro-title { min-width: 0; flex: 1; }
+.intro-title h2 {
+  margin: 0; font-size: 19px; font-weight: 650;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.intro-sub {
+  margin-top: 4px; font-size: 11.5px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.intro-desc {
+  margin: 16px 0 0;
+  font-size: 13.5px; line-height: 1.8;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+.intro-tags { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+.intro-tags:empty { margin: 0; }
+
+.intro-facts {
+  margin: 18px 0 0;
+  display: grid; grid-template-columns: 76px 1fr;
+  gap: 8px 14px;
+  font-size: 12.5px;
+}
+.intro-facts dt { color: var(--text-faint); }
+.intro-facts dd { margin: 0; color: var(--text-dim); word-break: break-all; }
+.intro-facts dd.mono { font-family: var(--mono); font-size: 11.5px; }
+
+.intro-issues {
+  margin-top: 14px; padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font-size: 12px; line-height: 1.7; color: var(--text-dim);
+}
+.intro-actions { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; }
+.intro-hint { margin-top: 14px; font-size: 11.5px; color: var(--text-faint); }
+
+/* 顶栏「启动应用」：介绍页里它是把应用拉起来的主入口，给一点强调色 */
+.launch-btn {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.launch-btn:hover { color: var(--accent); background: var(--accent-soft); }
 
 /* ─────────────────────────────  设置面板  ───────────────────────────── */
 .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; }
