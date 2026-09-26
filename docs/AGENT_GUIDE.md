@@ -346,6 +346,15 @@ python tools/install_app.py --remove myapp
 { "manifest": "{...完整的 JSON 字符串...}" }
 ```
 
+界面里不用手抄路径：「设置 → 应用管理 → **浏览…**」会弹出目录选择器，
+双击进文件夹、选中后点「使用这个目录」即把路径回填。它背后就是两个
+只读接口 —— `GET /api/fs/roots`（盘符）和 `GET /api/fs/list?path=...`
+（子目录 + `manifest.json`，带 `has_manifest` 标记）。
+**只列目录和 manifest.json，不返回文件内容。**
+
+> 目录选择器默认从平台根目录附近开始，不是从 `C:\` —— 省得每次一路翻盘。
+> 手动粘贴路径仍然可用，两种方式等价。
+
 > **方式二/三的注意点**：如果应用**已经在平台外部**（比如 `E:/Filecleanup`），
 > 用 `entry.cwd` 指向它即可，**不要**用安装命令去拷贝 —— 那会复制一份代码，
 > 后续两边不同步。FileCleanup 就是这么接的。
@@ -403,6 +412,12 @@ API 一览：
 | GET | `/api/system` | Python 版本、平台根目录、自启状态、Edge/Chrome 路径 |
 | GET | `/api/apps/<id>/log?n=80` | 应用日志尾部（**排查启动失败先看这个**） |
 | GET | `/api/config/export` | 下载配置（含各应用 manifest） |
+| GET | `/api/fs/roots` | 本机可用根目录（Windows = 存在的盘符），给目录选择器用 |
+| GET | `/api/fs/list?path=E:/MyApp` | 列出该目录下的**子目录 + manifest.json** |
+
+> **`/api/fs/*` 只服务"挑目录"这一件事**：返回目录名与 `has_manifest` 标记，
+> **不返回任何文件内容**。别把它当文件服务器用，也别指望它能读文件。
+
 
 ### 操作应用
 
@@ -467,6 +482,8 @@ curl -X POST -H "Content-Type: application/json" -d '{}' \
 | 页面能开但样式全丢 | 应用用了绝对路径资源且路径写死 | 用相对路径 |
 | 中文日志乱码 | 没设编码 | 平台已注入 `PYTHONIOENCODING=utf-8`；应用内部写文件时也要显式 `encoding="utf-8"` |
 | 停止后进程还在 | 应用起了子进程 | 平台会 `taskkill /T /F` 收树；若应用自己 spawn 了脱离进程，需自行处理 |
+| 装完打开星港，应用没自动启动 | 平台**默认就不自动启动**任何应用（`platform.auto_launch_last=false`） | 不是接入失败：双击启动即可；想自动恢复就在设置里打开「启动时恢复上次打开的应用」 |
+| 装应用报"找不到 manifest.json" | 选的目录里没有 manifest | 用「浏览…」挑带 `manifest.json` 徽标的目录，或直接选中那个 manifest.json 文件 |
 | 刚停止就探测端口仍通 | 正常竞态：进程退出与端口关闭有毫秒级延迟 | 等 1 秒再探测；平台状态以 `/api/status` 为准 |
 | 明明装了 Office，应用却显示"未安装" | **Office 从不把自己加进 PATH** | glob `Microsoft Office\root\Office*`，见 §11.2 |
 | 调 Office 转换后，机器越来越卡 | COM 是 MultiUse，每次留一个隐形进程（实测 21 个 ≈ 5 GB） | PID 快照 + 只回收自己拉起的那批，见 §11.5 |
@@ -828,14 +845,16 @@ try {
 | docx | 16 | xlsx | 51 | pptx | 24 |
 | doc | 0 | xls | 56 | ppt | 1 |
 | rtf | 6 | csv | 6 | | |
-| odt | 23 | html | 44 | | |
-| txt | 7 | | | | |
+| odt | 23 | ods | 60 | | |
+| txt | 7 | html | 44 | | |
 | html | 10 | | | | |
 
 两个坑：
 
 - Excel 存 PDF **不走 `SaveAs`**，要用 `ExportAsFixedFormat(0, $dst)`；
-- Word 存 txt 的码 7 产出的是 **UTF-16LE**，交给用户前要自己转成 UTF-8。
+- Word 存 txt 的码 7 产出的是 **UTF-16LE**，交给用户前要自己转成 UTF-8；
+- Excel 存 ODS 的码是 **60**（`xlOpenDocumentSpreadsheet`）—— 网上常有人说"Excel 不支持存 ODS"，
+  实测 16.0 可以，别被这句话劝退。
 
 ### 11.5 ⚠️ 进程回收：这套实现里最要紧的一段
 
@@ -930,6 +949,35 @@ WPS 文字（`KWPS.Application`）实测（12.1.0.28043 教育版）：
 - [ ] PDF → Word 用例真的跑通（不是靠把超时调大来掩盖死锁）
 - [ ] MS 与 WPS 两条路径各自跑过一遍
 - [ ] 跑完后**新起的** Office/WPS PID 已全部回收（WPS 的常驻后台不算）
+
+### 11.10 先算清"到底缺什么"，再决定要不要装东西
+
+有个亏吃过一次：**用户说"补全缺失的 XX 引擎"，不代表真的要装 XX。**
+
+正确顺序是先把缺口算出来 —— 遍历注册表，挑出"所有候选引擎都不可用"的那些组合：
+
+```python
+missing = [
+    (src, dst)
+    for (src, dst), cands in registry.conversions.items()
+    if not any(registry.engines[c.engine].available for c in cands)
+]
+```
+
+实测那一次的结果很有说服力：**声称缺的是 LibreOffice，但 10 个不可用的组合里
+没有一个属于 Word**（Word 早就被同一套 COM 方案覆盖了），全是
+`csv/html/txt/xls/xlsx → ods/xls/odt/rtf` 这类边角。
+于是把 Excel/Word 的矩阵补上（就是上面那个 `ods = 60`），**一个字节都没下载，
+不可用组合从 10 变成 0**。
+
+> **顺带一条配套规矩：每条转换的验证都要校产物文件头。**
+> Office / WPS 有"不报错但产出假文件"的先例（`SaveAs` 忽略格式码，给你一个 .doc 冒充 .odt）。
+> 只看"文件生成了、大小 > 0"会被骗过去。按扩展名核对容器类型：
+> `xls/doc/ppt` → OLE2 `d0cf11e0`；`xlsx/docx/odt/ods/odp` → ZIP `504b`；
+> `rtf` → `7b5c7274`（`{\rtf`）；`pdf` → `25504446`（`%PDF`）。
+
+**结论**：重型依赖从"必备"降级为"兜底"之后，它的价值要用加减法重算一遍。
+补了一百来行矩阵就能全绿的话，就没有理由让用户去下一个 330MB。
 
 ---
 

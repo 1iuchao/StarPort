@@ -1,0 +1,22 @@
+{
+  "id": "pdfstudio",
+  "name": "PDF 工坊",
+  "version": "0.1.0",
+  "type": "webservice",
+  "category": "文件工具",
+  "description": "PDF 页面编辑与批注：合并拆分、旋转重排、高亮批注、水印、加密、导出，非破坏性编辑",
+  "author": "刘超",
+  "icon": "icon.svg",
+  "tags": ["PDF", "编辑", "批注", "合并", "拆分", "水印", "加密", "离线"],
+  "entry": {
+    "command": ["{python}", "run.py", "--port", "{port}", "--no-browser"],
+    "cwd": "E:/starport-pdf-studio"
+  },
+  "health": {
+    "path": "/api/health",
+    "timeout": 30,
+    "stdout_port_pattern": "服务已启动：http://127\\.0\\.0\\.1:(\\d+)/"
+  },
+  "view": { "mode": "iframe", "path": "/" },
+  "stop": { "method": "http", "path": "/api/shutdown" }
+}
